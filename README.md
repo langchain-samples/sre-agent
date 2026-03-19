@@ -1,6 +1,6 @@
 # SRE Bot
 
-An autonomous Kubernetes SRE agent powered by Claude. It monitors cluster health, diagnoses issues, and applies fixes — with human approval required before any write operation.
+An autonomous Kubernetes SRE agent. It monitors cluster health, diagnoses issues, and applies fixes — with human approval required before any write operation.
 
 ## Features
 
