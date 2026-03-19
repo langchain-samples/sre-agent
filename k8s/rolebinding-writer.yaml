@@ -1,0 +1,15 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sre-bot-writer
+  namespace: sre-bot
+  labels:
+    app.kubernetes.io/name: sre-bot
+subjects:
+  - kind: ServiceAccount
+    name: sre-bot
+    namespace: sre-bot
+roleRef:
+  kind: Role
+  name: sre-bot-writer
+  apiGroup: rbac.authorization.k8s.io

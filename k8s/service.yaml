@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: sre-bot
+  namespace: sre-bot
+  labels:
+    app.kubernetes.io/name: sre-bot
+spec:
+  selector:
+    app: sre-bot
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+      protocol: TCP
+  type: ClusterIP
+---
+# Optional: expose outside the cluster via port-forward or an Ingress.
+# To access locally: kubectl port-forward svc/sre-bot 8080:80 -n sre-bot

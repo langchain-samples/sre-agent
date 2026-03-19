@@ -1,0 +1,119 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sre-bot
+  namespace: sre-bot
+  labels:
+    app.kubernetes.io/name: sre-bot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sre-bot
+  template:
+    metadata:
+      labels:
+        app: sre-bot
+        app.kubernetes.io/name: sre-bot
+    spec:
+      serviceAccountName: sre-bot
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: sre-bot
+          image: ericjohanson/sre-agent:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: sre-bot-secrets
+                  key: ANTHROPIC_API_KEY
+            - name: LANGSMITH_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: sre-bot-secrets
+                  key: LANGSMITH_API_KEY
+            - name: SLACK_BOT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: sre-bot-secrets
+                  key: SLACK_BOT_TOKEN
+            - name: SLACK_APP_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: sre-bot-secrets
+                  key: SLACK_APP_TOKEN
+            - name: LANGSMITH_PROJECT
+              value: "sre-bot"
+            - name: LANGSMITH_TRACING
+              value: "true"
+            - name: LANGSMITH_ENDPOINT
+              value: "https://api.smith.langchain.com"
+            - name: LANGSMITH_WORKSPACE
+              value: "39ebafb1-dcf2-4667-a7f3-ce83ae540e87"
+            - name: LANGCHAIN_TRACING_V2
+              value: "true"
+            - name: LANGCHAIN_PROJECT
+              value: "sre-bot"
+            - name: LANGCHAIN_ENDPOINT
+              value: "https://api.smith.langchain.com"
+            - name: LANGCHAIN_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: sre-bot-secrets
+                  key: LANGSMITH_API_KEY
+            - name: SLACK_CHANNEL
+              value: "#sre_alerts"
+            - name: MONITOR_INTERVAL_MINUTES
+              value: "60"                 # run every hour when enabled
+            - name: MONITORING_ENABLED
+              value: "false"              # set to "true" to re-enable scheduled checks
+            - name: API_PORT
+              value: "8080"
+            - name: DEFAULT_NAMESPACES
+              value: ""                   # set to "ns1,ns2" to limit scope and reduce token usage
+            # - name: PROMETHEUS_URL
+            #   value: "http://prometheus-server.monitoring.svc.cluster.local:9090"
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: conversation-history
+              mountPath: /app/conversation_history
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: conversation-history
+          emptyDir: {}
+      terminationGracePeriodSeconds: 30

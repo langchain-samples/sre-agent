@@ -1,0 +1,57 @@
+# Namespace-scoped write permissions for the SRE bot.
+#
+# By default this is only applied to the 'sre-bot' namespace itself.
+# To allow the bot to make changes in another namespace, copy the Role
+# and RoleBinding into that namespace:
+#
+#   kubectl apply -f k8s/role-writer.yaml -n production
+#   kubectl apply -f k8s/rolebinding-writer.yaml -n production
+#
+# ALL writes are still gated by HITL (human approval) inside the agent.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: sre-bot-writer
+  namespace: sre-bot
+  labels:
+    app.kubernetes.io/name: sre-bot
+rules:
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - deployments/scale
+      - statefulsets
+      - daemonsets
+    verbs: ["patch", "update"]
+
+  - apiGroups: ["autoscaling"]
+    resources:
+      - horizontalpodautoscalers
+    verbs: ["create", "patch", "update", "delete"]
+
+  - apiGroups: ["networking.k8s.io"]
+    resources:
+      - ingresses
+    verbs: ["create", "patch", "update", "delete"]
+
+  - apiGroups: [""]
+    resources:
+      - pods
+    verbs: ["delete"]
+
+  - apiGroups: [""]
+    resources:
+      - nodes
+    verbs: ["patch", "update"]
+
+  - apiGroups: [""]
+    resources:
+      - configmaps
+      - services
+    verbs: ["create", "patch", "update", "delete"]
+
+  # Custom resource writes — all CRD groups, gated by HITL
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["create", "patch", "update", "delete"]
