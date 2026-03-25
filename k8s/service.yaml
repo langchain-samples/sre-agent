@@ -1,13 +1,13 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: sre-bot
-  namespace: sre-bot
+  name: sre-agent
+  namespace: sre-agent
   labels:
-    app.kubernetes.io/name: sre-bot
+    app.kubernetes.io/name: sre-agent
 spec:
   selector:
-    app: sre-bot
+    app: sre-agent
   ports:
     - name: http
       port: 80
@@ -16,4 +16,4 @@ spec:
   type: ClusterIP
 ---
 # Optional: expose outside the cluster via port-forward or an Ingress.
-# To access locally: kubectl port-forward svc/sre-bot 8080:80 -n sre-bot
+# To access locally: kubectl port-forward svc/sre-agent 8080:80 -n sre-agent

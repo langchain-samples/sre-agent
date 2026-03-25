@@ -1,4 +1,5 @@
 .env
+gcp-pull-key.json
 __pycache__/
 *.pyc
 *.pyo

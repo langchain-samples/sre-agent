@@ -23,6 +23,28 @@ from .kubernetes_read import (
     kubectl_get_custom_resources,
     kubectl_rollout_history,
 )
+from .kubernetes_security import (
+    kubectl_get_rbac_summary,
+    kubectl_audit_pod_security,
+    kubectl_get_network_policies,
+    kubectl_audit_image_tags,
+)
+from .kubernetes_reliability import (
+    kubectl_get_pdbs,
+    kubectl_audit_probes,
+    kubectl_get_endpoints,
+    kubectl_audit_single_replicas,
+)
+from .kubernetes_batch import (
+    kubectl_get_jobs,
+    kubectl_get_cronjobs,
+)
+from .kubernetes_hygiene import (
+    kubectl_audit_missing_limits,
+    kubectl_get_pvs,
+    kubectl_get_limit_ranges,
+    kubectl_audit_selector_mismatch,
+)
 from .helm import (
     helm_list_releases,
     helm_get_release_values,
@@ -90,6 +112,24 @@ READ_TOOLS = [
     kubectl_get_crds,
     kubectl_get_custom_resources,
     kubectl_rollout_history,
+    # Security
+    kubectl_get_rbac_summary,
+    kubectl_audit_pod_security,
+    kubectl_get_network_policies,
+    kubectl_audit_image_tags,
+    # Reliability
+    kubectl_get_pdbs,
+    kubectl_audit_probes,
+    kubectl_get_endpoints,
+    kubectl_audit_single_replicas,
+    # Batch
+    kubectl_get_jobs,
+    kubectl_get_cronjobs,
+    # Hygiene
+    kubectl_audit_missing_limits,
+    kubectl_get_pvs,
+    kubectl_get_limit_ranges,
+    kubectl_audit_selector_mismatch,
     *HELM_READ_TOOLS,
 ]
 

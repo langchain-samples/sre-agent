@@ -1,15 +1,15 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: sre-bot-reader
+  name: sre-agent-reader
   labels:
-    app.kubernetes.io/name: sre-bot
+    app.kubernetes.io/name: sre-agent
 # Grants read-only access cluster-wide (observe all namespaces, no writes).
 subjects:
   - kind: ServiceAccount
-    name: sre-bot
-    namespace: sre-bot
+    name: sre-agent
+    namespace: sre-agent
 roleRef:
   kind: ClusterRole
-  name: sre-bot-reader
+  name: sre-agent-reader
   apiGroup: rbac.authorization.k8s.io

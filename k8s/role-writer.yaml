@@ -1,21 +1,14 @@
-# Namespace-scoped write permissions for the SRE bot.
+# Cluster-wide write permissions for the SRE bot.
 #
-# By default this is only applied to the 'sre-bot' namespace itself.
-# To allow the bot to make changes in another namespace, copy the Role
-# and RoleBinding into that namespace:
-#
-#   kubectl apply -f k8s/role-writer.yaml -n production
-#   kubectl apply -f k8s/rolebinding-writer.yaml -n production
-#
+# Granted across all namespaces via ClusterRole + ClusterRoleBinding.
 # ALL writes are still gated by HITL (human approval) inside the agent.
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
+kind: ClusterRole
 metadata:
-  name: sre-bot-writer
-  namespace: sre-bot
+  name: sre-agent-writer
   labels:
-    app.kubernetes.io/name: sre-bot
+    app.kubernetes.io/name: sre-agent
 rules:
   - apiGroups: ["apps"]
     resources:

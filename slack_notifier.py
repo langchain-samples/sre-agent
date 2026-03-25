@@ -4,7 +4,7 @@ import logging
 import os
 from typing import Optional
 
-log = logging.getLogger("sre-bot.slack")
+log = logging.getLogger("sre-agent.slack")
 
 SEVERITY_EMOJI = {
     "critical": ":red_circle:",

@@ -1,29 +1,29 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: sre-bot
-  namespace: sre-bot
+  name: sre-agent
+  namespace: sre-agent
   labels:
-    app.kubernetes.io/name: sre-bot
+    app.kubernetes.io/name: sre-agent
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: sre-bot
+      app: sre-agent
   template:
     metadata:
       labels:
-        app: sre-bot
-        app.kubernetes.io/name: sre-bot
+        app: sre-agent
+        app.kubernetes.io/name: sre-agent
     spec:
-      serviceAccountName: sre-bot
+      serviceAccountName: sre-agent
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
         fsGroup: 1000
       containers:
-        - name: sre-bot
-          image: ericjohanson/sre-agent:latest
+        - name: sre-agent
+          image: 640174622193.dkr.ecr.us-east-1.amazonaws.com/sre-agent:latest
           imagePullPolicy: Always
           ports:
             - name: http
@@ -33,25 +33,25 @@ spec:
             - name: ANTHROPIC_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: sre-bot-secrets
+                  name: sre-agent-secrets
                   key: ANTHROPIC_API_KEY
             - name: LANGSMITH_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: sre-bot-secrets
+                  name: sre-agent-secrets
                   key: LANGSMITH_API_KEY
             - name: SLACK_BOT_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: sre-bot-secrets
+                  name: sre-agent-secrets
                   key: SLACK_BOT_TOKEN
             - name: SLACK_APP_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: sre-bot-secrets
+                  name: sre-agent-secrets
                   key: SLACK_APP_TOKEN
             - name: LANGSMITH_PROJECT
-              value: "sre-bot"
+              value: "sre-agent"
             - name: LANGSMITH_TRACING
               value: "true"
             - name: LANGSMITH_ENDPOINT
@@ -61,13 +61,13 @@ spec:
             - name: LANGCHAIN_TRACING_V2
               value: "true"
             - name: LANGCHAIN_PROJECT
-              value: "sre-bot"
+              value: "sre-agent"
             - name: LANGCHAIN_ENDPOINT
               value: "https://api.smith.langchain.com"
             - name: LANGCHAIN_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: sre-bot-secrets
+                  name: sre-agent-secrets
                   key: LANGSMITH_API_KEY
             - name: SLACK_CHANNEL
               value: "#sre_alerts"

@@ -44,3 +44,18 @@ def custom_objects() -> client.CustomObjectsApi:
 def apiextensions_v1() -> client.ApiextensionsV1Api:
     init_client()
     return client.ApiextensionsV1Api()
+
+
+def rbac_v1() -> client.RbacAuthorizationV1Api:
+    init_client()
+    return client.RbacAuthorizationV1Api()
+
+
+def batch_v1() -> client.BatchV1Api:
+    init_client()
+    return client.BatchV1Api()
+
+
+def policy_v1() -> client.PolicyV1Api:
+    init_client()
+    return client.PolicyV1Api()

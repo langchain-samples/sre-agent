@@ -11,8 +11,10 @@ import logging
 import os
 import uuid
 from datetime import datetime, timezone
+from langsmith import traceable
+from langsmith.wrappers import wrap_anthropic
 
-log = logging.getLogger("sre-bot.scheduler")
+log = logging.getLogger("sre-agent.scheduler")
 
 # ---------------------------------------------------------------------------
 # Direct data-collection helpers (no LLM, no tokens)
@@ -204,6 +206,7 @@ def _format_snapshot(data: dict) -> str:
     return "\n".join(lines)
 
 
+@traceable(name="scheduled-health-check", run_type="llm")
 def _analyse_with_haiku(snapshot: str) -> tuple[str, str]:
     """Send the pre-collected snapshot to claude-haiku for analysis.
 
@@ -212,7 +215,7 @@ def _analyse_with_haiku(snapshot: str) -> tuple[str, str]:
     """
     import anthropic
 
-    client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY", ""))
+    client = wrap_anthropic(anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY", "")))
 
     system = (
         "You are a concise SRE assistant. You receive a Kubernetes cluster snapshot "

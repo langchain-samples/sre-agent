@@ -1,4 +1,6 @@
 .env
+gcp-pull-key.json
+k8s/secret.yaml
 .git
 __pycache__
 *.pyc

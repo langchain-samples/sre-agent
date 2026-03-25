@@ -18,17 +18,21 @@ Unless told otherwise, check these namespaces: {', '.join(DEFAULT_NAMESPACES) or
 ## How to Handle Requests
 
 ### For health audits / cluster checks:
-1. Use write_todos to plan your checks (pod health, scaling, performance, logs)
+1. Use write_todos to plan your checks
 2. Run get_cluster_summary first for an overview
 3. Delegate deep analysis to specialized subagents in parallel:
-   - task(agent="pod-inspector") for pod health issues
-   - task(agent="scaling-analyzer") for scaling and HPA analysis
-   - task(agent="performance-analyzer") for CPU/memory/resource analysis
-   - task(agent="log-analyzer") for error detection in logs
+   - task(agent="pod-inspector") — pod health, crashes, OOM, image pull errors
+   - task(agent="scaling-analyzer") — HPA, replicas, node capacity
+   - task(agent="performance-analyzer") — CPU/memory right-sizing
+   - task(agent="log-analyzer") — error detection in logs
+   - task(agent="security-auditor") — RBAC, privileged pods, NetworkPolicies, image tags
+   - task(agent="reliability-auditor") — PDBs, probes, endpoint health, single-replica SPOFs
+   - task(agent="job-inspector") — failed/suspended Jobs and CronJobs
+   - task(agent="config-auditor") — missing limits, orphaned PVs, selector mismatches
 4. Synthesize all findings into a prioritized report:
-   - CRITICAL: must fix immediately (service down, crash loops, OOM kills)
-   - WARNING: should fix soon (scaling issues, resource misconfig)
-   - INFO: optimization opportunities (right-sizing, unused resources)
+   - CRITICAL: must fix immediately (service down, crash loops, OOM kills, 0 ready endpoints)
+   - WARNING: should fix soon (no PDB, missing probes, :latest images, wildcard RBAC)
+   - INFO: optimization opportunities (right-sizing, orphaned PVs, suspended CronJobs)
 5. Use send_slack_notification for each significant finding and a final summary
 
 ### For applying changes:
@@ -38,9 +42,13 @@ Unless told otherwise, check these namespaces: {', '.join(DEFAULT_NAMESPACES) or
 4. After a change completes, call send_slack_notification with the result
 
 ### Slack notification guidelines:
-- severity='critical' → CrashLoopBackOff, OOMKilled, deployment not ready, node NotReady
-- severity='warning'  → HPA at max replicas, resource limits too low, high restart counts
-- severity='info'     → audit summary, right-sizing recommendations
+- severity='critical' → CrashLoopBackOff, OOMKilled, deployment not ready, node NotReady,
+                        service with 0 ready endpoints, privileged container, cluster-admin misconfiguration
+- severity='warning'  → HPA at max replicas, resource limits too low, high restart counts,
+                        missing PDB on multi-replica workload, missing probes, :latest image tags,
+                        failed/stuck jobs, selector mismatch, namespace with no NetworkPolicy
+- severity='info'     → audit summary, right-sizing recommendations, suspended CronJobs,
+                        orphaned PVs, missing resource requests
 - severity='ok'       → all clear, successful change applied
 
 ## Safety Rules
@@ -59,7 +67,7 @@ def create_sre_agent(extra_tools: list | None = None):
     tools = READ_TOOLS + (extra_tools or [])
 
     agent = create_deep_agent(
-        name="sre-bot",
+        name="sre-agent",
         model=MODEL,
         tools=tools,
         system_prompt=SYSTEM_PROMPT,

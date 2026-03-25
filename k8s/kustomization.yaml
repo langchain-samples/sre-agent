@@ -1,9 +1,8 @@
 # Deploy everything in order:
 #   kubectl apply -k k8s/
 #
-# To grant write access in additional namespaces (opt-in per namespace):
-#   kubectl apply -f k8s/role-writer.yaml -n <namespace>
-#   kubectl apply -f k8s/rolebinding-writer.yaml -n <namespace>
+# Write access is granted cluster-wide via ClusterRole + ClusterRoleBinding.
+# All writes are still gated by HITL (human approval) inside the agent.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
@@ -13,6 +12,5 @@ resources:
   - clusterrolebinding.yaml
   - role-writer.yaml
   - rolebinding-writer.yaml
-  - secret.yaml
   - deployment.yaml
   - service.yaml

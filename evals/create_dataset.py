@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DATASET_NAME = "sre-bot-k8s-eval"
+DATASET_NAME = "sre-agent-k8s-eval"
 
 # ---------------------------------------------------------------------------
 # Dataset

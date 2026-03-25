@@ -4,11 +4,11 @@ set -euo pipefail
 
 AWS_ACCOUNT="640174622193"
 AWS_REGION="us-east-1"
-ECR_REPO="sre-bot"
+ECR_REPO="sre-agent"
 IMAGE="${AWS_ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}"
 TAG="${1:-latest}"
 CLUSTER="langsmith-eks-gtm-east"
-NAMESPACE="sre-bot"
+NAMESPACE="sre-agent"
 
 echo "==> Checking AWS auth..."
 aws sts get-caller-identity --query 'Account' --output text > /dev/null
@@ -58,12 +58,12 @@ echo "==> Applying Kubernetes manifests..."
 kubectl apply -k "${K8S_DIR}"
 
 echo "==> Waiting for rollout..."
-kubectl rollout status deployment/sre-bot -n "${NAMESPACE}" --timeout=120s
+kubectl rollout status deployment/sre-agent -n "${NAMESPACE}" --timeout=120s
 
 echo "==> Deployment status:"
 kubectl get pods -n "${NAMESPACE}"
 
 echo ""
 echo "Done! To access the web UI:"
-echo "  kubectl port-forward svc/sre-bot 8080:80 -n ${NAMESPACE}"
+echo "  kubectl port-forward svc/sre-agent 8080:80 -n ${NAMESPACE}"
 echo "  open http://localhost:8080"

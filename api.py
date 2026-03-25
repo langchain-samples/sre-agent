@@ -22,7 +22,7 @@ from sse_starlette.sse import EventSourceResponse
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
-log = logging.getLogger("sre-bot")
+log = logging.getLogger("sre-agent")
 
 # ---------------------------------------------------------------------------
 # Session state
@@ -43,8 +43,10 @@ class Session:
     status: SessionStatus = SessionStatus.IDLE
     interrupt_data: Any = None
     last_response: str = ""
-    source: str = "api"                  # 'api' | 'scheduler'
+    source: str = "api"                  # 'api' | 'scheduler' | 'slack'
     slack_message_ts: Optional[str] = None
+    slack_channel: Optional[str] = None  # channel to post responses back to
+    slack_thread_ts: Optional[str] = None  # thread to reply in
     event_queue: asyncio.Queue = field(default_factory=asyncio.Queue)
 
 
@@ -171,6 +173,113 @@ def _do_reject(session: Session, reason: str, loop):
 
 
 # ---------------------------------------------------------------------------
+# Slack chat helpers
+# ---------------------------------------------------------------------------
+
+_SLACK_MAX = 3000  # Slack text block character limit
+
+
+def _post_long_response(client, channel: str, thread_ts: str, thinking_ts: str, response: str):
+    """Post a response to Slack, handling long content gracefully.
+
+    - Under 3000 chars: update the thinking message in place.
+    - Over 3000 chars: update thinking message with a summary line, then upload
+      the full content as a file snippet so nothing gets cut off.
+    """
+    if len(response) <= _SLACK_MAX:
+        client.chat_update(channel=channel, ts=thinking_ts, text=response)
+        return
+
+    # First line of the response as a short summary
+    summary = response.splitlines()[0][:200]
+    client.chat_update(
+        channel=channel,
+        ts=thinking_ts,
+        text=f"{summary}\n\n_Full output uploaded as a file below._",
+    )
+    client.files_upload_v2(
+        channel=channel,
+        thread_ts=thread_ts,
+        content=response,
+        filename="sre-agent-response.txt",
+        title="Full Response",
+    )
+
+
+def _post_agent_result_to_slack(result: dict, session: Session, client, channel: str,
+                                  thread_ts: str, thinking_ts: str):
+    """Process agent result and update the Slack thinking message with the response."""
+    interrupts = result.get("__interrupt__", [])
+    if interrupts:
+        session.status = SessionStatus.INTERRUPTED
+        session.interrupt_data = [str(i) for i in interrupts]
+        session.slack_channel = channel
+        session.slack_thread_ts = thread_ts
+
+        if _notifier and _notifier.enabled:
+            ts = _notifier.send_hitl_request(session.id, "\n".join(session.interrupt_data))
+            session.slack_message_ts = ts
+
+        alerts_channel = os.getenv("SLACK_CHANNEL", "#sre-alerts")
+        client.chat_update(
+            channel=channel,
+            ts=thinking_ts,
+            text=f":warning: Action requires your approval — check {alerts_channel}",
+        )
+    else:
+        messages = result.get("messages", [])
+        response = ""
+        if messages:
+            last = messages[-1]
+            response = last.content if hasattr(last, "content") else str(last)
+        session.last_response = response
+        session.status = SessionStatus.DONE
+        _post_long_response(client, channel, thread_ts, thinking_ts, response or "(no response)")
+
+
+def _run_for_slack(text: str, session: Session, client, channel: str, thread_ts: str):
+    """Run the agent for a Slack message and post the result back to the thread."""
+    if not _agent:
+        return
+    thinking = client.chat_postMessage(
+        channel=channel,
+        thread_ts=thread_ts,
+        text=":hourglass_flowing_sand: Working on it...",
+    )
+    try:
+        config = {"configurable": {"thread_id": session.thread_id}}
+        result = _agent.invoke({"messages": [{"role": "user", "content": text}]}, config=config)
+        _post_agent_result_to_slack(result, session, client, channel, thread_ts, thinking["ts"])
+    except Exception as e:
+        session.status = SessionStatus.ERROR
+        log.exception("Slack agent error (session=%s)", session.id)
+        client.chat_update(channel=channel, ts=thinking["ts"], text=f":red_circle: Error: {e}")
+
+
+def _resume_for_slack(command, session: Session, client):
+    """Resume a HITL-interrupted session and post the result back to the original thread."""
+    if not _agent:
+        return
+    channel = session.slack_channel
+    thread_ts = session.slack_thread_ts
+    if not channel or not thread_ts:
+        return
+    thinking = client.chat_postMessage(
+        channel=channel,
+        thread_ts=thread_ts,
+        text=":hourglass_flowing_sand: Continuing...",
+    )
+    try:
+        config = {"configurable": {"thread_id": session.thread_id}}
+        result = _agent.invoke(command, config=config)
+        _post_agent_result_to_slack(result, session, client, channel, thread_ts, thinking["ts"])
+    except Exception as e:
+        session.status = SessionStatus.ERROR
+        log.exception("Slack resume error (session=%s)", session.id)
+        client.chat_update(channel=channel, ts=thinking["ts"], text=f":red_circle: Error: {e}")
+
+
+# ---------------------------------------------------------------------------
 # Slack Bolt (Socket Mode — no public ingress required)
 # ---------------------------------------------------------------------------
 
@@ -186,7 +295,44 @@ def _start_slack_bolt(main_loop: asyncio.AbstractEventLoop):
         from slack_bolt import App
         from slack_bolt.adapter.socket_mode import SocketModeHandler
 
+        import re
+
         bolt = App(token=bot_token)
+
+        @bolt.event("app_mention")
+        def handle_mention(event, client):
+            # Strip the @mention from the text
+            text = re.sub(r"<@[A-Z0-9]+>", "", event.get("text", "")).strip()
+            if not text:
+                client.chat_postMessage(
+                    channel=event["channel"],
+                    thread_ts=event["ts"],
+                    text="Hi! Ask me anything about your cluster — e.g. _grab logs from pod X_ or _run a health audit_.",
+                )
+                return
+
+            channel = event["channel"]
+            # Use the thread root as the thread_id so context is preserved per thread
+            thread_ts = event.get("thread_ts") or event["ts"]
+            session_id = f"slack-{thread_ts}"
+
+            if session_id not in _sessions:
+                session = Session(
+                    id=session_id,
+                    thread_id=session_id,
+                    source="slack",
+                    slack_channel=channel,
+                    slack_thread_ts=thread_ts,
+                )
+                _sessions[session_id] = session
+            else:
+                session = _sessions[session_id]
+                session.status = SessionStatus.RUNNING
+                session.slack_channel = channel
+                session.slack_thread_ts = thread_ts
+
+            log.info("Slack mention from %s: %s", event.get("user"), text[:80])
+            _run_for_slack(text, session, client, channel, thread_ts)
 
         @bolt.action("sre_approve")
         def handle_approve(ack, body, client):
@@ -212,13 +358,21 @@ def _start_slack_bolt(main_loop: asyncio.AbstractEventLoop):
                 )
                 return
 
-            # Update Slack message to show approved
             if _notifier and session.slack_message_ts:
                 _notifier.update_hitl_resolved(
                     session.slack_message_ts, approved=True, actor=actor
                 )
 
-            _do_approve(session, main_loop)
+            if session.source == "slack":
+                session.status = SessionStatus.RUNNING
+                _executor.submit(
+                    _resume_for_slack,
+                    Command(resume={"decisions": [{"type": "approve"}]}),
+                    session,
+                    client,
+                )
+            else:
+                _do_approve(session, main_loop)
 
         @bolt.action("sre_reject")
         def handle_reject(ack, body, client):
@@ -234,14 +388,22 @@ def _start_slack_bolt(main_loop: asyncio.AbstractEventLoop):
             if session.status != SessionStatus.INTERRUPTED:
                 return
 
-            # Prompt for reason via modal
             reason = ""
             if _notifier and session.slack_message_ts:
                 _notifier.update_hitl_resolved(
                     session.slack_message_ts, approved=False, actor=actor
                 )
 
-            _do_reject(session, reason, main_loop)
+            if session.source == "slack":
+                session.status = SessionStatus.RUNNING
+                _executor.submit(
+                    _resume_for_slack,
+                    Command(resume={"decisions": [{"type": "reject", "message": reason}]}),
+                    session,
+                    client,
+                )
+            else:
+                _do_reject(session, reason, main_loop)
 
         handler = SocketModeHandler(bolt, app_token)
         log.info("Starting Slack Bolt Socket Mode handler")
