@@ -1,9 +1,10 @@
 """Upload the three SRE-agent online evaluators to LangSmith."""
+import os
 import re
 import requests
 
-API_KEY = "LANGSMITH_API_KEY_REMOVED"
-PROJECT_ID = "ff2f04b3-1455-4e8f-b287-8cbcd1336262"
+API_KEY = os.environ["LANGSMITH_API_KEY"]
+PROJECT_ID = os.environ["LANGSMITH_PROJECT_ID"]
 BASE_URL = "https://api.smith.langchain.com"
 HEADERS = {"x-api-key": API_KEY, "Content-Type": "application/json"}
 

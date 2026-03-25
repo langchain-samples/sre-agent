@@ -4,12 +4,12 @@ An autonomous Kubernetes SRE agent. It monitors cluster health, diagnoses issues
 
 ## Features
 
-- **Autonomous health audits** — pods, scaling, resource usage, and logs analyzed in parallel by specialized subagents
+- **Autonomous health audits** — pods, scaling, resources, logs, security, reliability, config hygiene, and batch jobs analyzed in parallel by specialized subagents
 - **Human-in-the-loop (HITL)** — every write operation (restart, scale, patch) pauses for explicit approval
 - **Slack integration** — alerts, health reports, and HITL approve/reject buttons via Socket Mode (no public ingress needed)
 - **Scheduled monitoring** — periodic cluster health checks on a configurable interval
 - **Two interfaces** — CLI for interactive use, FastAPI + web UI for in-cluster deployment
-- **LangSmith tracing** — full observability of every agent run
+- **LangSmith tracing** — full observability of every agent run, with an eval dataset and online evaluators
 
 ## Example Output
 
@@ -17,16 +17,22 @@ Slack health report showing a cluster audit with critical and warning findings:
 
 ![Slack health report](docs/slack-health-report.png)
 
+![Slack health report 2](docs/slack_health_2.png)
+
 ## Architecture
 
 ```text
 main.py / api.py
     └── SRE orchestrator (agent.py)
-            ├── pod-inspector       (read-only)
-            ├── scaling-analyzer    (read-only)
-            ├── performance-analyzer (read-only)
-            ├── log-analyzer        (read-only)
-            └── change-executor     (write ops — all require HITL approval)
+            ├── pod-inspector        (read-only) — pod health, crashes, logs
+            ├── scaling-analyzer     (read-only) — HPA, replicas, node capacity
+            ├── performance-analyzer (read-only) — CPU/memory right-sizing
+            ├── log-analyzer         (read-only) — error detection in logs
+            ├── security-auditor     (read-only) — RBAC, privileged pods, NetworkPolicies, image tags
+            ├── reliability-auditor  (read-only) — PDBs, probes, endpoints, single-replica SPOFs
+            ├── job-inspector        (read-only) — Jobs, CronJobs, failures, missed schedules
+            ├── config-auditor       (read-only) — resource limits, PV hygiene, selector mismatches
+            └── change-executor      (write ops — all require HITL approval)
 ```
 
 The main agent only has read tools. All writes are delegated to `change-executor`, which is configured to interrupt before every write tool call.
@@ -69,34 +75,43 @@ python api.py         # API + web UI at http://localhost:8080
 
 ## Deploy to Kubernetes
 
+The included `deploy.sh` handles build, ECR push, and EKS apply in one step:
+
+```bash
+./deploy.sh           # tags as :latest
+./deploy.sh v1.2.0    # optional: tag with a version
+```
+
+Or manually:
+
 ```bash
 # 1. Build and push your image
-docker build -t your-registry/sre-bot:latest .
-docker push your-registry/sre-bot:latest
+docker build --platform linux/amd64 -t your-registry/sre-agent:latest .
+docker push your-registry/sre-agent:latest
 # Update image in k8s/deployment.yaml
 
 # 2. Create the secrets file (never commit this)
-cp k8s/secret.yaml.example k8s/secret.yaml   # or fill in manually
 #   Each value must be base64-encoded:
 echo -n "sk-ant-..." | base64   # ANTHROPIC_API_KEY
 echo -n "lsv2_..."  | base64   # LANGSMITH_API_KEY
 echo -n "xoxb-..."  | base64   # SLACK_BOT_TOKEN
 echo -n "xapp-..."  | base64   # SLACK_APP_TOKEN
+# Paste values into k8s/secret.yaml
 
 # 3. Apply
 kubectl apply -k k8s/
 
 # 4. Access the UI
-kubectl port-forward svc/sre-bot 8080:80 -n sre-bot
+kubectl port-forward svc/sre-agent 8080:80 -n sre-agent
 # Open http://localhost:8080
 ```
 
 ### RBAC
 
-The included ClusterRole grants:
+The included manifests grant:
 
-- **Read** on all resources cluster-wide
-- **Write** (patch/update) scoped to deployments, HPAs, pods, and nodes only
+- **Read** on all resources cluster-wide (`ClusterRole: sre-agent-reader`)
+- **Write** (patch/update/delete) on all namespaces cluster-wide (`ClusterRole: sre-agent-writer`)
 
 All write operations are still gated by HITL regardless of RBAC.
 
@@ -106,7 +121,7 @@ All write operations are still gated by HITL regardless of RBAC.
 | ---- | ----------- |
 | CLI (`main.py`) | `Ctrl+C` |
 | API (`api.py`) | `Ctrl+C` or `kill <pid>` |
-| In-cluster | `kubectl scale deployment sre-bot -n sre-bot --replicas=0` |
+| In-cluster | `kubectl scale deployment sre-agent -n sre-agent --replicas=0` |
 | Delete everything | `kubectl delete -k k8s/` |
 
 ## Project structure
@@ -118,20 +133,28 @@ main.py               CLI entry point
 config.py             Env-based configuration
 scheduler.py          Periodic health check scheduler
 slack_notifier.py     Slack Block Kit messages and HITL action handling
+deploy.sh             Build, push to ECR, and deploy to EKS
 tools/
-  kubernetes_read.py  Read-only kubectl tools
-  kubernetes_write.py Write tools (all require HITL approval)
-  k8s_client.py       In-cluster vs local kubectl detection
-  slack.py            Slack notification tool for the agent
-  helm.py             Helm tools
+  kubernetes_read.py      Read-only kubectl tools
+  kubernetes_write.py     Write tools (all require HITL approval)
+  kubernetes_security.py  RBAC, pod security, NetworkPolicy, image tag tools
+  kubernetes_reliability.py  PDB, probe, endpoint, single-replica tools
+  kubernetes_hygiene.py   Resource limits, PV, selector mismatch tools
+  kubernetes_batch.py     Job and CronJob tools
+  k8s_client.py           In-cluster vs local kubectl detection
+  slack.py                Slack notification tool for the agent
 subagents/
   pod_inspector.py
   scaling_analyzer.py
   performance_analyzer.py
   log_analyzer.py
-  change_executor.py  Only subagent with write tools
+  security_auditor.py
+  reliability_auditor.py
+  job_inspector.py
+  config_auditor.py
+  change_executor.py      Only subagent with write tools
 k8s/                  Kustomize manifests for cluster deployment
-evals/                LangSmith evaluation dataset creation
+evals/                LangSmith evaluation dataset and online evaluators
 ```
 
 ## Security notes
