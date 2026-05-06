@@ -2,6 +2,7 @@
 from __future__ import annotations
 import logging
 import os
+import re
 from typing import Optional
 
 log = logging.getLogger("sre-agent.slack")
@@ -79,28 +80,94 @@ class SlackNotifier:
             log.info("[SLACK DISABLED] Health report (has_issues=%s)", has_issues)
             return None
 
-        emoji = ":large_yellow_circle:" if has_issues else ":large_green_circle:"
-        color = "#d69e2e" if has_issues else "#38a169"
-        title = "Cluster Health Report" + (" — Issues Found" if has_issues else " — All Clear")
+        # Normalize markdown bold to Slack mrkdwn bold
+        text = re.sub(r"\*\*(.+?)\*\*", r"*\1*", summary)
 
-        # Truncate summary for Slack (max 3000 chars per block)
-        truncated = summary[:2800] + "\n_(truncated)_" if len(summary) > 2800 else summary
+        has_critical = bool(re.search(r"critical issues?|\[CRITICAL\]", summary, re.IGNORECASE))
+        emoji = ":large_green_circle:" if not has_issues else (":red_circle:" if has_critical else ":large_yellow_circle:")
+        title = "Cluster Health Report" + (" — Critical Issues Found" if has_critical else " — Issues Found" if has_issues else " — All Clear")
 
-        blocks = [
+        _section_styles = {
+            "critical": (":red_circle:", "#e53e3e"),
+            "warning":  (":large_yellow_circle:", "#d69e2e"),
+            "info":     (":large_blue_circle:", "#3182ce"),
+        }
+
+        # Normalise free-form section headers to canonical tokens before parsing
+        text = re.sub(r"\*?(Critical Issues?|CRITICAL):?\*?", "[CRITICAL]", text, flags=re.IGNORECASE)
+        text = re.sub(r"\*?(Warning Issues?|Secondary Issues?|WARNING):?\*?", "[WARNING]", text, flags=re.IGNORECASE)
+        text = re.sub(r"\*?(Info(?:rmation)?|Optimizations?|INFO):?\*?", "[INFO]", text, flags=re.IGNORECASE)
+        text = re.sub(r"\*?(Recommendations?|Recommended actions?):?\*?", "Recommended actions:", text, flags=re.IGNORECASE)
+
+        # Split text into labelled sections + trailing recommendations
+        section_re = re.compile(
+            r"\[?(CRITICAL|WARNING|INFO)\]?[ \t]*\n?(.*?)(?=\n\[?(?:CRITICAL|WARNING|INFO)\]?|"
+            r"\nRecommended actions:|\Z)",
+            re.IGNORECASE | re.DOTALL,
+        )
+        rec_re = re.compile(r"Recommended actions:\s*(.*)", re.IGNORECASE | re.DOTALL)
+
+        sections = list(section_re.finditer(text))
+        rec_match = rec_re.search(text)
+
+        def _trunc(s: str, n: int) -> str:
+            return s[:n] + "\n_(truncated)_" if len(s) > n else s
+
+        attachments = [
             {
-                "type": "header",
-                "text": {"type": "plain_text", "text": f"{emoji}  {title}"},
-            },
-            {
-                "type": "section",
-                "text": {"type": "mrkdwn", "text": truncated},
-            },
-            {
-                "type": "context",
-                "elements": [{"type": "mrkdwn", "text": f"Source: {source}"}],
-            },
+                "color": "#38a169" if not has_issues else "#d69e2e",
+                "blocks": [{"type": "header", "text": {"type": "plain_text", "text": f"{emoji}  {title}"}}],
+            }
         ]
-        return self._post(blocks=blocks, color=color, text=title)
+
+        if sections:
+            for m in sections:
+                sev = m.group(1).lower()
+                content = m.group(2).strip()
+                if not content:
+                    continue
+                sev_emoji, color = _section_styles.get(sev, (":white_circle:", "#718096"))
+                attachments.append({
+                    "color": color,
+                    "blocks": [{
+                        "type": "section",
+                        "text": {"type": "mrkdwn", "text": f"{sev_emoji} *{sev.upper()}*\n{_trunc(content, 2700)}"},
+                    }],
+                })
+        else:
+            # No section markers — dump the full text (minus recommendations)
+            body = text[:rec_match.start()].strip() if rec_match else text
+            attachments.append({
+                "color": "#d69e2e" if has_issues else "#718096",
+                "blocks": [{"type": "section", "text": {"type": "mrkdwn", "text": _trunc(body, 2700)}}],
+            })
+
+        if rec_match:
+            rec_body = rec_match.group(1).strip()
+            if rec_body:
+                attachments.append({
+                    "color": "#4a5568",
+                    "blocks": [{
+                        "type": "section",
+                        "text": {"type": "mrkdwn", "text": f":clipboard: *Recommended Actions*\n{_trunc(rec_body, 1200)}"},
+                    }],
+                })
+
+        attachments.append({
+            "color": "#2d3748",
+            "blocks": [{"type": "context", "elements": [{"type": "mrkdwn", "text": f"Source: {source}"}]}],
+        })
+
+        try:
+            resp = self._client.chat_postMessage(
+                channel=self.channel,
+                text=f"{emoji} {title}",
+                attachments=attachments,
+            )
+            return resp["ts"]
+        except Exception as e:
+            log.error("Slack post failed: %s", e)
+            return None
 
     def send_hitl_request(
         self,

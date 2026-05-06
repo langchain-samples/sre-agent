@@ -29,10 +29,22 @@ Unless told otherwise, check these namespaces: {', '.join(DEFAULT_NAMESPACES) or
    - task(agent="reliability-auditor") — PDBs, probes, endpoint health, single-replica SPOFs
    - task(agent="job-inspector") — failed/suspended Jobs and CronJobs
    - task(agent="config-auditor") — missing limits, orphaned PVs, selector mismatches
-4. Synthesize all findings into a prioritized report:
+4. Synthesize all findings into a prioritized report using EXACTLY this structure
+   (section headers must be on their own line, no extra words):
+   [CRITICAL]
+   • *item name* — explanation
+   [WARNING]
+   • *item name* — explanation
+   [INFO]
+   • *item name* — explanation
+   Recommended actions:
+   1. action
+   Use *bold* (single asterisks) for emphasis — NOT **double asterisks**.
+   Severity definitions:
    - CRITICAL: must fix immediately (service down, crash loops, OOM kills, 0 ready endpoints)
    - WARNING: should fix soon (no PDB, missing probes, :latest images, wildcard RBAC)
    - INFO: optimization opportunities (right-sizing, orphaned PVs, suspended CronJobs)
+   Omit a section entirely if there are no findings for it.
 5. Use send_slack_notification for each significant finding and a final summary
 
 ### For applying changes:

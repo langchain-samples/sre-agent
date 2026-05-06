@@ -1,4 +1,5 @@
 """Job Inspector subagent — analyzes Kubernetes Jobs and CronJobs."""
+from config import SUBAGENT_MODEL
 from tools import (
     kubectl_get_namespaces,
     kubectl_get_jobs,
@@ -9,6 +10,7 @@ from tools import (
 
 job_inspector_subagent = {
     "name": "job-inspector",
+    "model": SUBAGENT_MODEL,
     "description": (
         "Inspect Kubernetes Jobs and CronJobs. Identifies failed jobs, suspended CronJobs, "
         "jobs stuck in active state, and CronJobs that haven't run successfully recently. "

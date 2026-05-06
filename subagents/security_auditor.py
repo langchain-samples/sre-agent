@@ -1,4 +1,5 @@
 """Security Auditor subagent — RBAC, pod security, network policies, image hygiene."""
+from config import SUBAGENT_MODEL
 from tools import (
     kubectl_get_namespaces,
     kubectl_get_rbac_summary,
@@ -9,6 +10,7 @@ from tools import (
 
 security_auditor_subagent = {
     "name": "security-auditor",
+    "model": SUBAGENT_MODEL,
     "description": (
         "Audit Kubernetes security posture. Checks RBAC for overly broad permissions and "
         "cluster-admin bindings, scans pods for privileged containers / hostNetwork / root "

@@ -1,4 +1,5 @@
 """Reliability Auditor subagent — PDBs, probes, endpoints, single-replica SPOFs."""
+from config import SUBAGENT_MODEL
 from tools import (
     kubectl_get_namespaces,
     kubectl_get_pdbs,
@@ -10,6 +11,7 @@ from tools import (
 
 reliability_auditor_subagent = {
     "name": "reliability-auditor",
+    "model": SUBAGENT_MODEL,
     "description": (
         "Audit Kubernetes reliability and resilience. Identifies workloads missing "
         "PodDisruptionBudgets (unprotected during node drains), containers without "

@@ -445,3 +445,95 @@ def kubectl_delete_resource(
             )
         return f"Deleted {resource_type}/{resource_name} in {namespace}."
     return _safe(_run)
+
+
+@tool
+def kubectl_scale_bulk(targets_json: str) -> str:
+    """
+    Scale multiple deployments or statefulsets in one operation.
+    targets_json: JSON array of objects with keys:
+      - deployment_name (str)
+      - namespace (str)
+      - replicas (int)
+      - kind (str, optional): "deployment" (default) or "statefulset"
+    Example:
+      '[{"deployment_name":"web","namespace":"prod","replicas":0},
+        {"deployment_name":"api","namespace":"prod","replicas":0,"kind":"statefulset"}]'
+    REQUIRES HUMAN APPROVAL before execution.
+    """
+    def _run():
+        try:
+            targets = json.loads(targets_json)
+        except json.JSONDecodeError as e:
+            return f"ERROR: Invalid JSON — {e}"
+        results = []
+        for t in targets:
+            name = t.get("deployment_name") or t.get("name", "")
+            ns = t.get("namespace", "default")
+            replicas = t.get("replicas", 0)
+            kind = t.get("kind", "deployment").lower()
+            try:
+                patch = {"spec": {"replicas": replicas}}
+                if kind == "statefulset":
+                    apps_v1().patch_namespaced_stateful_set(name, ns, patch)
+                else:
+                    apps_v1().patch_namespaced_deployment_scale(name, ns, patch)
+                results.append(f"✓ {kind}/{name} in {ns} → {replicas} replicas")
+            except ApiException as e:
+                results.append(f"✗ {kind}/{name} in {ns}: [{e.status}] {e.reason}")
+        return "\n".join(results) if results else "No targets provided."
+    return _safe(_run)
+
+
+@tool
+def kubectl_delete_resources_bulk(targets_json: str) -> str:
+    """
+    Delete multiple Kubernetes resources in one operation.
+    targets_json: JSON array of objects with keys:
+      - resource_type (str): deployment, statefulset, daemonset, service, configmap,
+                             ingress, hpa, pvc, pod
+      - resource_name (str)
+      - namespace (str, default "default")
+    Example:
+      '[{"resource_type":"deployment","resource_name":"web","namespace":"prod"},
+        {"resource_type":"pvc","resource_name":"data-0","namespace":"prod"}]'
+    REQUIRES HUMAN APPROVAL before execution.
+    """
+    def _run():
+        try:
+            targets = json.loads(targets_json)
+        except json.JSONDecodeError as e:
+            return f"ERROR: Invalid JSON — {e}"
+        body = k8s_client.V1DeleteOptions()
+        results = []
+        for t in targets:
+            rt = t.get("resource_type", "").lower()
+            name = t.get("resource_name", "")
+            ns = t.get("namespace", "default")
+            try:
+                if rt == "deployment":
+                    apps_v1().delete_namespaced_deployment(name, ns, body=body)
+                elif rt == "statefulset":
+                    apps_v1().delete_namespaced_stateful_set(name, ns, body=body)
+                elif rt == "daemonset":
+                    apps_v1().delete_namespaced_daemon_set(name, ns, body=body)
+                elif rt == "service":
+                    core_v1().delete_namespaced_service(name, ns, body=body)
+                elif rt == "configmap":
+                    core_v1().delete_namespaced_config_map(name, ns, body=body)
+                elif rt == "ingress":
+                    networking_v1().delete_namespaced_ingress(name, ns, body=body)
+                elif rt == "hpa":
+                    autoscaling_v2().delete_namespaced_horizontal_pod_autoscaler(name, ns, body=body)
+                elif rt == "pvc":
+                    core_v1().delete_namespaced_persistent_volume_claim(name, ns, body=body)
+                elif rt == "pod":
+                    core_v1().delete_namespaced_pod(name, ns, body=body)
+                else:
+                    results.append(f"✗ unsupported resource_type '{rt}'")
+                    continue
+                results.append(f"✓ deleted {rt}/{name} in {ns}")
+            except ApiException as e:
+                results.append(f"✗ {rt}/{name} in {ns}: [{e.status}] {e.reason}")
+        return "\n".join(results) if results else "No targets provided."
+    return _safe(_run)

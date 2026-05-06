@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 MODEL = "claude-sonnet-4-6"
+SUBAGENT_MODEL = "claude-haiku-4-5-20251001"  # Used for read-only subagents to reduce cost
 PROMETHEUS_URL = os.getenv("PROMETHEUS_URL", "")
 
 # In-cluster detection: Kubernetes injects SERVICE_ACCOUNT_TOKEN at this path

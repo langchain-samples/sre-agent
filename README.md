@@ -64,11 +64,14 @@ python api.py         # API + web UI at http://localhost:8080
 | -------- | -------- | ----------- |
 | `ANTHROPIC_API_KEY` | Yes | Claude API key |
 | `LANGSMITH_API_KEY` | Yes | LangSmith tracing key |
-| `LANGSMITH_PROJECT` | No | Project name (default: `sre-bot`) |
+| `LANGSMITH_TRACING` | Yes | Set to `true` to enable tracing |
+| `LANGSMITH_PROJECT` | No | Project name (default: `sre-agent`) |
+| `LANGSMITH_WORKSPACE_ID` | No | Route traces to a specific LangSmith workspace |
 | `SLACK_BOT_TOKEN` | No | `xoxb-...` bot token |
 | `SLACK_APP_TOKEN` | No | `xapp-...` Socket Mode token |
 | `SLACK_CHANNEL` | No | Channel for alerts (default: `#sre-alerts`) |
 | `MONITOR_INTERVAL_MINUTES` | No | Health check frequency (default: `30`) |
+| `MONITORING_ENABLED` | No | Set to `true` to enable scheduled checks (default: `false`) |
 | `DEFAULT_NAMESPACES` | No | Comma-separated namespaces to watch (default: auto-discover) |
 | `PROMETHEUS_URL` | No | Prometheus endpoint for richer metrics |
 | `API_PORT` | No | Port for API server (default: `8080`) |
@@ -85,23 +88,27 @@ The included `deploy.sh` handles build, ECR push, and EKS apply in one step:
 Or manually:
 
 ```bash
-# 1. Build and push your image
-docker build --platform linux/amd64 -t your-registry/sre-agent:latest .
-docker push your-registry/sre-agent:latest
+# 1. Authenticate with ECR (tokens expire every 12 hours)
+aws ecr get-login-password --region us-east-1 \
+  | docker login --username AWS --password-stdin <account-id>.dkr.ecr.us-east-1.amazonaws.com
+
+# 2. Build and push (--push avoids a separate docker push step)
+docker buildx build --platform linux/amd64 \
+  -t your-registry/sre-agent:latest --push .
 # Update image in k8s/deployment.yaml
 
-# 2. Create the secrets file (never commit this)
-#   Each value must be base64-encoded:
+# 3. Create the secrets file (never commit this)
+#   Values under data: must be base64-encoded; stringData: accepts plain text
 echo -n "sk-ant-..." | base64   # ANTHROPIC_API_KEY
 echo -n "lsv2_..."  | base64   # LANGSMITH_API_KEY
 echo -n "xoxb-..."  | base64   # SLACK_BOT_TOKEN
 echo -n "xapp-..."  | base64   # SLACK_APP_TOKEN
 # Paste values into k8s/secret.yaml
 
-# 3. Apply
+# 4. Apply
 kubectl apply -k k8s/
 
-# 4. Access the UI
+# 5. Access the UI
 kubectl port-forward svc/sre-agent 8080:80 -n sre-agent
 # Open http://localhost:8080
 ```
@@ -135,14 +142,17 @@ scheduler.py          Periodic health check scheduler
 slack_notifier.py     Slack Block Kit messages and HITL action handling
 deploy.sh             Build, push to ECR, and deploy to EKS
 tools/
-  kubernetes_read.py      Read-only kubectl tools
-  kubernetes_write.py     Write tools (all require HITL approval)
-  kubernetes_security.py  RBAC, pod security, NetworkPolicy, image tag tools
-  kubernetes_reliability.py  PDB, probe, endpoint, single-replica tools
-  kubernetes_hygiene.py   Resource limits, PV, selector mismatch tools
-  kubernetes_batch.py     Job and CronJob tools
-  k8s_client.py           In-cluster vs local kubectl detection
-  slack.py                Slack notification tool for the agent
+  kubernetes_read.py        Read-only kubectl tools
+  kubernetes_write.py       Write tools (all require HITL approval), including
+                            kubectl_scale_bulk and kubectl_delete_resources_bulk
+                            for batching multiple resources into a single approval
+  kubernetes_security.py    RBAC, pod security, NetworkPolicy, image tag tools
+  kubernetes_reliability.py PDB, probe, endpoint, single-replica tools
+  kubernetes_hygiene.py     Resource limits, PV, selector mismatch tools
+  kubernetes_batch.py       Job and CronJob tools
+  helm.py                   Helm release inspection and upgrade/rollback tools
+  k8s_client.py             In-cluster vs local kubectl detection
+  slack.py                  Slack notification tool for the agent
 subagents/
   pod_inspector.py
   scaling_analyzer.py
@@ -154,7 +164,11 @@ subagents/
   config_auditor.py
   change_executor.py      Only subagent with write tools
 k8s/                  Kustomize manifests for cluster deployment
-evals/                LangSmith evaluation dataset and online evaluators
+evals/
+  create_dataset.py         Script to upload eval examples to LangSmith
+  sre-agent-k8s-eval.jsonl  Pre-built JSONL dataset (upload directly via LangSmith UI)
+  evaluators.py             Online evaluators
+  upload_online_evals.py    Script to register online evaluators
 ```
 
 ## Security notes

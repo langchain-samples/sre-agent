@@ -1,4 +1,5 @@
 """Config Auditor subagent — resource limits, PV hygiene, selector mismatches, LimitRanges."""
+from config import SUBAGENT_MODEL
 from tools import (
     kubectl_get_namespaces,
     kubectl_audit_missing_limits,
@@ -10,6 +11,7 @@ from tools import (
 
 config_auditor_subagent = {
     "name": "config-auditor",
+    "model": SUBAGENT_MODEL,
     "description": (
         "Audit Kubernetes configuration hygiene. Finds containers missing resource requests/limits "
         "(noisy neighbor risk), orphaned PersistentVolumes wasting storage, services with selector "

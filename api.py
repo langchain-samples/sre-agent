@@ -42,6 +42,7 @@ class Session:
     thread_id: str
     status: SessionStatus = SessionStatus.IDLE
     interrupt_data: Any = None
+    pending_decisions: int = 1           # number of tool calls awaiting approval
     last_response: str = ""
     source: str = "api"                  # 'api' | 'scheduler' | 'slack'
     slack_message_ts: Optional[str] = None
@@ -74,6 +75,13 @@ def _handle_result(result: dict, session: Session, loop):
     if interrupts:
         session.status = SessionStatus.INTERRUPTED
         session.interrupt_data = [str(i) for i in interrupts]
+
+        # Count pending tool calls so resume sends the right number of decisions
+        n = 0
+        for interrupt in interrupts:
+            val = interrupt.value if hasattr(interrupt, "value") else {}
+            n += len(val.get("action_requests", [])) if isinstance(val, dict) else 0
+        session.pending_decisions = max(n, 1)
 
         # Notify via Slack
         if _notifier and _notifier.enabled:
@@ -149,7 +157,7 @@ def _do_approve(session: Session, loop):
         _executor,
         _resume_agent_sync,
         _agent,
-        Command(resume={"decisions": [{"type": "approve"}]}),
+        Command(resume={"decisions": [{"type": "approve"}] * session.pending_decisions}),
         config,
         session,
         loop,
@@ -165,7 +173,7 @@ def _do_reject(session: Session, reason: str, loop):
         _executor,
         _resume_agent_sync,
         _agent,
-        Command(resume={"decisions": [{"type": "reject", "message": reason}]}),
+        Command(resume={"decisions": [{"type": "reject", "message": reason}] * session.pending_decisions}),
         config,
         session,
         loop,
@@ -215,6 +223,12 @@ def _post_agent_result_to_slack(result: dict, session: Session, client, channel:
         session.interrupt_data = [str(i) for i in interrupts]
         session.slack_channel = channel
         session.slack_thread_ts = thread_ts
+
+        n = 0
+        for interrupt in interrupts:
+            val = interrupt.value if hasattr(interrupt, "value") else {}
+            n += len(val.get("action_requests", [])) if isinstance(val, dict) else 0
+        session.pending_decisions = max(n, 1)
 
         if _notifier and _notifier.enabled:
             ts = _notifier.send_hitl_request(session.id, "\n".join(session.interrupt_data))
@@ -300,7 +314,11 @@ def _start_slack_bolt(main_loop: asyncio.AbstractEventLoop):
         bolt = App(token=bot_token)
 
         @bolt.event("app_mention")
-        def handle_mention(event, client):
+        def handle_mention(event, body, client):
+            # Ignore Slack delivery retries — the first invocation is already in-flight
+            if body.get("headers", {}).get("x-slack-retry-num"):
+                return
+
             # Strip the @mention from the text
             text = re.sub(r"<@[A-Z0-9]+>", "", event.get("text", "")).strip()
             if not text:
@@ -327,12 +345,16 @@ def _start_slack_bolt(main_loop: asyncio.AbstractEventLoop):
                 _sessions[session_id] = session
             else:
                 session = _sessions[session_id]
+                if session.status in (SessionStatus.RUNNING, SessionStatus.INTERRUPTED):
+                    log.info("Ignoring duplicate Slack event for session %s (status=%s)", session_id, session.status)
+                    return
                 session.status = SessionStatus.RUNNING
                 session.slack_channel = channel
                 session.slack_thread_ts = thread_ts
 
             log.info("Slack mention from %s: %s", event.get("user"), text[:80])
-            _run_for_slack(text, session, client, channel, thread_ts)
+            # Submit to executor so this handler returns immediately (prevents Slack retries)
+            _executor.submit(_run_for_slack, text, session, client, channel, thread_ts)
 
         @bolt.action("sre_approve")
         def handle_approve(ack, body, client):
@@ -367,7 +389,7 @@ def _start_slack_bolt(main_loop: asyncio.AbstractEventLoop):
                 session.status = SessionStatus.RUNNING
                 _executor.submit(
                     _resume_for_slack,
-                    Command(resume={"decisions": [{"type": "approve"}]}),
+                    Command(resume={"decisions": [{"type": "approve"}] * session.pending_decisions}),
                     session,
                     client,
                 )
@@ -398,7 +420,7 @@ def _start_slack_bolt(main_loop: asyncio.AbstractEventLoop):
                 session.status = SessionStatus.RUNNING
                 _executor.submit(
                     _resume_for_slack,
-                    Command(resume={"decisions": [{"type": "reject", "message": reason}]}),
+                    Command(resume={"decisions": [{"type": "reject", "message": reason}] * session.pending_decisions}),
                     session,
                     client,
                 )
@@ -598,7 +620,7 @@ async def edit(req: EditRequest):
         _executor,
         _resume_agent_sync,
         _agent,
-        Command(resume={"decisions": [{"type": "edit", "args": req.args}]}),
+        Command(resume={"decisions": [{"type": "edit", "args": req.args}] * session.pending_decisions}),
         {"configurable": {"thread_id": session.thread_id}},
         session,
         loop,

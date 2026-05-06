@@ -57,7 +57,15 @@ spec:
             - name: LANGSMITH_ENDPOINT
               value: "https://api.smith.langchain.com"
             - name: LANGSMITH_WORKSPACE
-              value: "39ebafb1-dcf2-4667-a7f3-ce83ae540e87"
+              valueFrom:
+                secretKeyRef:
+                  name: sre-agent-secrets
+                  key: LANGSMITH_WORKSPACE_ID
+            - name: LANGSMITH_WORKSPACE_ID
+              valueFrom:
+                secretKeyRef:
+                  name: sre-agent-secrets
+                  key: LANGSMITH_WORKSPACE_ID
             - name: LANGCHAIN_TRACING_V2
               value: "true"
             - name: LANGCHAIN_PROJECT
