@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from langsmith import traceable
@@ -206,6 +207,124 @@ def _format_snapshot(data: dict) -> str:
     return "\n".join(lines)
 
 
+_VERSION_RE = re.compile(r"\bv\d+\.\d+\.\d+(?:[-+][A-Za-z0-9][A-Za-z0-9._-]*)?\b")
+_DEPLOYMENT_AGGREGATE_RE = re.compile(r"\b(\d+)\s*(?:of|/)\s*(\d+)\s+deployments?\b", re.IGNORECASE)
+_FACTUAL_CLAIM_PHRASES = (
+    "queue depth",
+    "queue latency",
+    "latency",
+    "queue processing",
+    "workload shedding",
+    "dropped tasks",
+    "sustained demand",
+    "missed deployment",
+    "missed deployments",
+    "webhook misconfiguration",
+    "decommissioning",
+    "maintenance window",
+    "maintenance windows",
+    "resource constraints",
+    "no failures detected",
+    "no resource constraints detected",
+)
+_ADVISORY_WORDS = (
+    "?",
+    "verify",
+    "check",
+    "confirm",
+    "investigate",
+    "recommend",
+    "consider",
+    "review",
+    "look for",
+    "look into",
+)
+
+
+def _snapshot_node_versions(snapshot: str) -> set[str]:
+    versions: set[str] = set()
+    in_nodes = False
+    for line in snapshot.splitlines():
+        stripped = line.strip()
+        if stripped == "=== NODES ===":
+            in_nodes = True
+            continue
+        if stripped.startswith("=== "):
+            in_nodes = False
+        if in_nodes and stripped:
+            parts = stripped.split()
+            if len(parts) >= 3:
+                versions.add(parts[-1])
+    return versions
+
+
+def _snapshot_deployment_counts(snapshot: str) -> tuple[int, int]:
+    total = 0
+    ready_at_desired = 0
+    in_deployments = False
+    for line in snapshot.splitlines():
+        stripped = line.strip()
+        if stripped == "=== DEPLOYMENTS ===":
+            in_deployments = True
+            continue
+        if stripped.startswith("=== "):
+            in_deployments = False
+        if not in_deployments or not stripped:
+            continue
+        desired_match = re.search(r"\bdesired=(\d+)\b", stripped)
+        ready_match = re.search(r"\bready=(\d+)\b", stripped)
+        if desired_match and ready_match:
+            total += 1
+            if int(ready_match.group(1)) >= int(desired_match.group(1)):
+                ready_at_desired += 1
+    return total, ready_at_desired
+
+
+def _is_advisory(line: str) -> bool:
+    lower = line.lower()
+    normalized = lower.lstrip("-•* 0123456789.)")
+    return "?" in lower or any(normalized.startswith(word) for word in _ADVISORY_WORDS if word != "?")
+
+
+def _has_unsupported_factual_claim(line: str) -> bool:
+    lower = line.lower()
+    return any(phrase in lower for phrase in _FACTUAL_CLAIM_PHRASES) and not _is_advisory(line)
+
+
+def _has_invalid_version(line: str, valid_versions: set[str]) -> bool:
+    return any(match.group(0) not in valid_versions for match in _VERSION_RE.finditer(line))
+
+
+def _has_invalid_deployment_aggregate(line: str, total: int, ready_at_desired: int) -> bool:
+    for match in _DEPLOYMENT_AGGREGATE_RE.finditer(line):
+        first = int(match.group(1))
+        second = int(match.group(2))
+        if second != total:
+            return True
+        lower = line.lower()
+        expected = total - ready_at_desired if any(
+            phrase in lower for phrase in ("not ready", "unready", "unavailable", "below desired", "not at desired")
+        ) else ready_at_desired
+        if first != expected:
+            return True
+    return False
+
+
+def _sanitize_analysis(snapshot: str, text: str) -> str:
+    valid_versions = _snapshot_node_versions(snapshot)
+    deployment_total, ready_at_desired = _snapshot_deployment_counts(snapshot)
+    kept_lines = []
+    for line in text.splitlines():
+        if valid_versions and _has_invalid_version(line, valid_versions):
+            continue
+        if deployment_total and _has_invalid_deployment_aggregate(line, deployment_total, ready_at_desired):
+            continue
+        if _has_unsupported_factual_claim(line):
+            continue
+        kept_lines.append(line)
+    return "\n".join(kept_lines).strip() or "[OK]\n- No supported findings in the provided snapshot."
+
+
 @traceable(name="scheduled-health-check", run_type="llm")
 def _analyse_with_haiku(snapshot: str) -> tuple[str, str]:
     """Send the pre-collected snapshot to claude-haiku for analysis.
@@ -218,11 +337,24 @@ def _analyse_with_haiku(snapshot: str) -> tuple[str, str]:
     client = wrap_anthropic(anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY", "")))
 
     system = (
-        "You are a concise SRE assistant. You receive a Kubernetes cluster snapshot "
-        "and produce a short health report. "
-        "Start your response with exactly one of: [CRITICAL], [WARNING], or [OK]. "
-        "Then list findings as bullet points. Keep the total response under 400 words. "
-        "Focus on actionable issues. Skip healthy resources unless there is a pattern worth noting."
+        "You are a concise SRE assistant. You receive ONLY a Kubernetes cluster snapshot "
+        "with these fields: NODES (name, ready/status, version), DEPLOYMENTS (namespace/name, "
+        "desired, ready), PODS or UNHEALTHY PODS (count, healthy status, restarts, age), HPAs "
+        "(current/min/max or current/max), RECENT WARNING EVENTS, and COLLECTION ERRORS. No "
+        "traffic, queue, latency, error-rate, utilization, capacity, scaling-history, operator "
+        "intent, deployment-history, webhook, maintenance, or decommissioning data is provided. "
+        "Start your response with exactly one of: [CRITICAL], [WARNING], or [OK]. Then list "
+        "findings as bullet points. Keep the total response under 400 words. Focus on actionable "
+        "issues directly observed in the snapshot. Skip healthy resources unless there is an "
+        "observed pattern worth noting. Do not state speculative operational claims as facts, "
+        "including queue depth/latency, queue processing, workload shedding, dropped tasks, "
+        "sustained demand, missed deployments, webhook misconfiguration, decommissioning, "
+        "maintenance windows, resource constraints, no failures detected, or no resource "
+        "constraints detected. These topics may appear only as questions to verify or "
+        "recommendations, never as observations. Copy emitted values verbatim: node version "
+        "strings must exactly match a value in the snapshot, including the full suffix such as "
+        "v1.30.14-eks-ecaa3a6. Derive aggregate counts by counting snapshot rows; do not estimate "
+        "or round counts like X of Y deployments at desired."
     )
 
     response = client.messages.create(
@@ -238,6 +370,7 @@ def _analyse_with_haiku(snapshot: str) -> tuple[str, str]:
     )
 
     text = response.content[0].text if response.content else ""
+    text = _sanitize_analysis(snapshot, text)
     if text.startswith("[CRITICAL]"):
         severity = "critical"
     elif text.startswith("[WARNING]"):
