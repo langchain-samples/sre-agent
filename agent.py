@@ -1,6 +1,9 @@
 """Main SRE orchestrator agent."""
+from typing import Any
+
 from deepagents import create_deep_agent
 from deepagents.backends import FilesystemBackend
+from langchain_core.messages import AIMessage
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.store.memory import InMemoryStore
 
@@ -71,6 +74,158 @@ Unless told otherwise, check these namespaces: {', '.join(DEFAULT_NAMESPACES) or
 """
 
 
+def _content_text(content: Any) -> str:
+    """Extract user-visible text from a LangChain message content field."""
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                text = item.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "\n".join(part.strip() for part in parts if part and part.strip()).strip()
+    if content is None:
+        return ""
+    return str(content).strip()
+
+
+def _message_text(message: Any) -> str:
+    """Extract user-visible text from a LangChain message or message dict."""
+    if isinstance(message, dict):
+        return _content_text(message.get("content"))
+    return _content_text(getattr(message, "content", ""))
+
+
+def _message_name(message: Any) -> str:
+    if isinstance(message, dict):
+        return str(message.get("name") or "")
+    return str(getattr(message, "name", "") or "")
+
+
+def _tool_call_name(tool_call: Any) -> str:
+    if isinstance(tool_call, dict):
+        return str(tool_call.get("name") or "")
+    return str(getattr(tool_call, "name", "") or "")
+
+
+def _tool_call_args(tool_call: Any) -> dict:
+    if isinstance(tool_call, dict):
+        args = tool_call.get("args") or tool_call.get("input") or {}
+    else:
+        args = getattr(tool_call, "args", {}) or getattr(tool_call, "input", {}) or {}
+    return args if isinstance(args, dict) else {}
+
+
+def _tool_call_id(tool_call: Any) -> str:
+    if isinstance(tool_call, dict):
+        return str(tool_call.get("id") or "")
+    return str(getattr(tool_call, "id", "") or "")
+
+
+def _message_tool_call_id(message: Any) -> str:
+    if isinstance(message, dict):
+        return str(message.get("tool_call_id") or "")
+    return str(getattr(message, "tool_call_id", "") or "")
+
+
+def _message_tool_calls(message: Any) -> list[Any]:
+    calls = []
+    tool_calls = []
+    if isinstance(message, dict):
+        tool_calls = message.get("tool_calls") or []
+        content = message.get("content") or []
+    else:
+        tool_calls = getattr(message, "tool_calls", []) or []
+        content = getattr(message, "content", []) or []
+    calls.extend(tool_calls)
+    if isinstance(content, list):
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "tool_use":
+                calls.append(item)
+    return calls
+
+
+def _change_executor_task_call_ids(messages: list[Any]) -> set[str]:
+    call_ids = set()
+    for message in messages:
+        for call in _message_tool_calls(message):
+            args = _tool_call_args(call)
+            subagent = args.get("subagent_type") or args.get("agent")
+            if _tool_call_name(call) == "task" and subagent == "change-executor":
+                call_id = _tool_call_id(call)
+                if call_id:
+                    call_ids.add(call_id)
+    return call_ids
+
+
+def _latest_change_executor_instruction(messages: list[Any]) -> str:
+    for message in reversed(messages):
+        for call in reversed(_message_tool_calls(message)):
+            if _tool_call_name(call) != "task":
+                continue
+            args = _tool_call_args(call)
+            subagent = args.get("subagent_type") or args.get("agent")
+            if subagent != "change-executor":
+                continue
+            instruction = args.get("description") or args.get("instruction") or args.get("task")
+            return str(instruction).strip() if instruction else ""
+    return ""
+
+
+def _latest_task_result_text(messages: list[Any]) -> str:
+    change_executor_call_ids = _change_executor_task_call_ids(messages)
+    for message in reversed(messages):
+        message_call_id = _message_tool_call_id(message)
+        if _message_name(message) == "task" or message_call_id in change_executor_call_ids:
+            return _message_text(message)
+    return ""
+
+
+def _change_executor_fallback(messages: list[Any]) -> str:
+    task_result = _latest_task_result_text(messages)
+    if task_result:
+        return task_result
+
+    instruction = _latest_change_executor_instruction(messages)
+    if instruction:
+        return (
+            "The approved Kubernetes change was handed off to the change-executor and completed, "
+            f"but no detailed subagent report was returned. Request: {instruction}"
+        )
+    return "The approved Kubernetes change completed, but no detailed subagent report was returned."
+
+
+def _ensure_change_executor_response(result: dict) -> dict:
+    """Append a response when change-executor returns no final text."""
+    messages = result.get("messages", [])
+    if not messages or _message_text(messages[-1]):
+        return result
+    if not _latest_change_executor_instruction(messages) and not _latest_task_result_text(messages):
+        return result
+
+    updated = dict(result)
+    updated["messages"] = [*messages, AIMessage(content=_change_executor_fallback(messages))]
+    return updated
+
+
+class SREAgent:
+    def __init__(self, agent):
+        self._agent = agent
+
+    def invoke(self, *args, **kwargs):
+        result = self._agent.invoke(*args, **kwargs)
+        if isinstance(result, dict):
+            return _ensure_change_executor_response(result)
+        return result
+
+    def __getattr__(self, name):
+        return getattr(self._agent, name)
+
+
 def create_sre_agent(extra_tools: list | None = None):
     """Create and return the main SRE orchestrator agent."""
     checkpointer = MemorySaver()
@@ -88,4 +243,4 @@ def create_sre_agent(extra_tools: list | None = None):
         checkpointer=checkpointer,
         store=store,
     )
-    return agent
+    return SREAgent(agent)
