@@ -206,7 +206,7 @@ def _format_snapshot(data: dict) -> str:
     return "\n".join(lines)
 
 
-@traceable(name="scheduled-health-check", run_type="llm")
+@traceable(name="scheduled-health-check", run_type="chain")
 def _analyse_with_haiku(snapshot: str) -> tuple[str, str]:
     """Send the pre-collected snapshot to claude-haiku for analysis.
 
