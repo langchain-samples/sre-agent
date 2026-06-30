@@ -1,0 +1,41 @@
+slack_notifier.py
+  s_f2f28e354f691a::t_2e65e13d61dad9 72-161,168-173,321,324,326,335,338-339
+  s_f2f28e354f691a::t_a6d108afff639d 318-320
+  s_f2f28e354f691a::t_7b67dbe2b39bc9 322-323
+  s_f2f28e354f691a::t_d21f0a205f7f47 325
+  s_f2f28e354f691a::t_3101956f9bb4c5 327-329,332-334
+  s_f2f28e354f691a::t_6a95355040005c 336-337
+  s_f2f28e354f691a::t_db11d175d8d53a 340-341
+  s_f2f28e354f691a::t_e2922355cd8de7 315-317,330-331
+.gitignore
+  s_f2f28e354f691a::t_21d930bef4c6e1 16-19
+  s_f2f28e354f691a::t_affc25143832b3 15
+scheduler.py
+  s_f2f28e354f691a::t_3bed88c535a0b2 323,326-328,332
+  s_f2f28e354f691a::t_5ef79feff5a2de 210,213-214,217,223-226,228-232,236,238-239,248-260
+schemas.py
+  s_f2f28e354f691a::t_e46352bf3a9dfe 1-49
+tools/kubernetes_write.py
+  s_f2f28e354f691a::t_a62bc834aa5b63 105-117,126-137,141-142
+evals/evaluators.py
+  s_f2f28e354f691a::t_4e155ea3a388fb 22-37,44-47,49-50
+README.md
+  s_f2f28e354f691a::t_c4dac1d1a23fd2 10-11
+  s_f2f28e354f691a::t_f7fd82f1cae4f4 142-143,145
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "ecb23d73d22711fcdac2e3b2d3c1944f1a9f398f",
+  "prompts": {},
+  "sessions": {
+    "s_f2f28e354f691a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b50742c2-97ac-4256-acc8-deff7bf8da80",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Eric Johanson <eric.johanson@langchain.dev>"
+    }
+  }
+}
