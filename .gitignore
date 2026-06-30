@@ -12,3 +12,8 @@ venv/
 
 # Never commit secrets
 k8s/secret.yaml
+endpoints.json
+*.pem
+*.key
+*.crt
+credentials.json

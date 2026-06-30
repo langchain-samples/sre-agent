@@ -207,28 +207,36 @@ def _format_snapshot(data: dict) -> str:
 
 
 @traceable(name="scheduled-health-check", run_type="llm")
-def _analyse_with_haiku(snapshot: str) -> tuple[str, str]:
+def _analyse_with_haiku(snapshot: str) -> "HealthReport":
     """Send the pre-collected snapshot to claude-haiku for analysis.
 
-    Returns (severity, analysis_text) where severity is one of:
-    'critical', 'warning', 'ok'.
+    Uses forced tool-use so the model returns a validated HealthReport rather
+    than free text that has to be regex-parsed downstream.
     """
     import anthropic
+    from schemas import HealthReport
 
     client = wrap_anthropic(anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY", "")))
 
     system = (
         "You are a concise SRE assistant. You receive a Kubernetes cluster snapshot "
-        "and produce a short health report. "
-        "Start your response with exactly one of: [CRITICAL], [WARNING], or [OK]. "
-        "Then list findings as bullet points. Keep the total response under 400 words. "
-        "Focus on actionable issues. Skip healthy resources unless there is a pattern worth noting."
+        "and produce a structured health report by calling the report_health tool. "
+        "Focus on actionable issues and name specific resources. Skip healthy "
+        "resources unless there is a pattern worth noting. Set overall_severity to "
+        "the highest severity among your findings, or 'ok' if the cluster is healthy."
     )
+    tool = {
+        "name": "report_health",
+        "description": "Report the structured cluster health assessment.",
+        "input_schema": HealthReport.model_json_schema(),
+    }
 
     response = client.messages.create(
         model="claude-haiku-4-5-20251001",
-        max_tokens=600,
+        max_tokens=1200,
         system=system,
+        tools=[tool],
+        tool_choice={"type": "tool", "name": "report_health"},
         messages=[
             {
                 "role": "user",
@@ -237,15 +245,19 @@ def _analyse_with_haiku(snapshot: str) -> tuple[str, str]:
         ],
     )
 
-    text = response.content[0].text if response.content else ""
-    if text.startswith("[CRITICAL]"):
-        severity = "critical"
-    elif text.startswith("[WARNING]"):
-        severity = "warning"
-    else:
-        severity = "ok"
-
-    return severity, text
+    tool_input = next(
+        (block.input for block in response.content if getattr(block, "type", None) == "tool_use"),
+        None,
+    )
+    if tool_input is None:
+        # Model failed to call the tool — surface a safe degraded report.
+        return HealthReport(
+            overall_severity="warning",
+            summary="Health analysis returned no structured output; review the cluster manually.",
+            findings=[],
+            recommended_actions=[],
+        )
+    return HealthReport.model_validate(tool_input)
 
 
 # ---------------------------------------------------------------------------
@@ -308,18 +320,16 @@ class MonitoringScheduler:
         try:
             data = _collect_cluster_data()
             snapshot = _format_snapshot(data)
-            severity, analysis = _analyse_with_haiku(snapshot)
+            report = _analyse_with_haiku(snapshot)
 
-            has_issues = severity in ("critical", "warning")
             log.info(
-                "Health check complete (session=%s, severity=%s, unhealthy_pods=%d)",
-                session_id, severity, len(data.get("unhealthy_pods", [])),
+                "Health check complete (session=%s, severity=%s, findings=%d, unhealthy_pods=%d)",
+                session_id, report.overall_severity, len(report.findings),
+                len(data.get("unhealthy_pods", [])),
             )
 
             if self._notifier.enabled:
-                self._notifier.send_health_report(
-                    analysis, has_issues=has_issues, source="scheduled"
-                )
+                self._notifier.send_structured_report(report, source="scheduled")
         except Exception as e:
             log.exception("Scheduled health check failed (session=%s)", session_id)
             if self._notifier.enabled:

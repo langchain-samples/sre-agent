@@ -102,7 +102,19 @@ def kubectl_patch_hpa(
         if max_replicas > 0:
             patch["spec"]["maxReplicas"] = max_replicas
         if target_cpu_utilization > 0:
-            patch["spec"]["metrics"] = [{
+            # `metrics` is an atomic list — a patch replaces it wholesale, so we
+            # must read the live HPA and merge rather than clobber any existing
+            # memory/custom metrics. Update the CPU Resource metric in place if
+            # present, otherwise append a new one.
+            hpa = autoscaling_v2().read_namespaced_horizontal_pod_autoscaler(
+                hpa_name, namespace
+            )
+            api_client = k8s_client.ApiClient()
+            existing = [
+                api_client.sanitize_for_serialization(m)
+                for m in (hpa.spec.metrics or [])
+            ]
+            cpu_metric = {
                 "type": "Resource",
                 "resource": {
                     "name": "cpu",
@@ -111,11 +123,23 @@ def kubectl_patch_hpa(
                         "averageUtilization": target_cpu_utilization,
                     },
                 },
-            }]
+            }
+            merged = []
+            replaced = False
+            for m in existing:
+                if m.get("type") == "Resource" and (m.get("resource") or {}).get("name") == "cpu":
+                    merged.append(cpu_metric)
+                    replaced = True
+                else:
+                    merged.append(m)
+            if not replaced:
+                merged.append(cpu_metric)
+            patch["spec"]["metrics"] = merged
         if not patch["spec"]:
             return "ERROR: at least one HPA field must be specified"
         autoscaling_v2().patch_namespaced_horizontal_pod_autoscaler(hpa_name, namespace, patch)
-        return f"Patched HPA {hpa_name}/{namespace}: {patch['spec']}"
+        changed = [k for k in ("minReplicas", "maxReplicas", "metrics") if k in patch["spec"]]
+        return f"Patched HPA {hpa_name}/{namespace}: updated {', '.join(changed)}"
     return _safe(_run)
 
 
