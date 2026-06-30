@@ -19,23 +19,35 @@ _SEVERITY_PATTERN = re.compile(
     r"\[(CRITICAL|WARNING|INFO|OK)\]", re.IGNORECASE
 )
 
-def _extract_severity(text: str) -> str | None:
-    m = _SEVERITY_PATTERN.search(text)
+def _extract_severity(output) -> str | None:
+    """Pull a severity out of an output.
+
+    Prefers a structured `overall_severity` field (from schemas.HealthReport);
+    falls back to regex on `[CRITICAL]`-style markers in free text.
+    """
+    # Structured output: a HealthReport-shaped dict (possibly nested under a key).
+    if isinstance(output, dict):
+        for candidate in (output, output.get("response"), output.get("health_report")):
+            if isinstance(candidate, dict) and candidate.get("overall_severity"):
+                return str(candidate["overall_severity"]).upper()
+        text = output.get("expected_response", "")
+    else:
+        text = output or ""
+
+    m = _SEVERITY_PATTERN.search(text if isinstance(text, str) else str(text))
     return m.group(1).upper() if m else None
 
 
 def severity_accuracy(run, example):
     """Check whether the agent used the correct severity bracket.
 
-    Looks for [CRITICAL] / [WARNING] / [INFO] / [OK] in both the expected
-    and actual responses.  Returns 1 if they match, 0 otherwise.
-    A missing bracket in either response is treated as a non-match.
+    Reads a structured `overall_severity` when present, else looks for
+    [CRITICAL] / [WARNING] / [INFO] / [OK] in the free-text response. Returns 1
+    if expected and actual match, 0 otherwise. A missing severity in either is
+    treated as a non-match.
     """
-    agent_text = run["outputs"].get("expected_response", "")
-    expected_text = example["outputs"].get("expected_response", "")
-
-    actual_sev = _extract_severity(agent_text)
-    expected_sev = _extract_severity(expected_text)
+    actual_sev = _extract_severity(run["outputs"])
+    expected_sev = _extract_severity(example["outputs"])
 
     if actual_sev is None or expected_sev is None:
         return {

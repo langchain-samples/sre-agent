@@ -69,13 +69,108 @@ class SlackNotifier:
         ]
         return self._post(blocks=blocks, color=color, text=f"{emoji} {title}")
 
+    def send_structured_report(
+        self,
+        report,
+        source: str = "scheduled",
+    ) -> Optional[str]:
+        """Render a typed HealthReport into Slack Block Kit — no text parsing.
+
+        `report` is a schemas.HealthReport. Findings are grouped by severity and
+        rendered directly from typed fields, which removes the regex-on-markdown
+        fragility of send_health_report.
+        """
+        if not self.enabled:
+            log.info(
+                "[SLACK DISABLED] Structured report (severity=%s, findings=%d)",
+                report.overall_severity, len(report.findings),
+            )
+            return None
+
+        has_issues = report.has_issues
+        has_critical = report.overall_severity == "critical"
+        emoji = (
+            ":red_circle:" if has_critical
+            else ":large_yellow_circle:" if has_issues
+            else ":large_green_circle:"
+        )
+        title = "Cluster Health Report" + (
+            " — Critical Issues Found" if has_critical
+            else " — Issues Found" if has_issues
+            else " — All Clear"
+        )
+
+        def _trunc(s: str, n: int) -> str:
+            return s[:n] + "\n_(truncated)_" if len(s) > n else s
+
+        attachments = [{
+            "color": "#e53e3e" if has_critical else "#d69e2e" if has_issues else "#38a169",
+            "blocks": [
+                {"type": "header", "text": {"type": "plain_text", "text": f"{emoji}  {title}"}},
+                {"type": "section", "text": {"type": "mrkdwn", "text": _trunc(report.summary, 2700)}},
+            ],
+        }]
+
+        # One attachment per severity group, in priority order.
+        for sev in ("critical", "warning", "info"):
+            group = [f for f in report.findings if f.severity == sev]
+            if not group:
+                continue
+            sev_emoji = SEVERITY_EMOJI.get(sev, ":white_circle:")
+            color = SEVERITY_COLOR.get(sev, "#718096")
+            lines = []
+            for f in group:
+                ns = f" · `{f.namespace}`" if f.namespace else ""
+                lines.append(f"• *{f.title}*{ns} — {f.detail}")
+            attachments.append({
+                "color": color,
+                "blocks": [{
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": _trunc(f"{sev_emoji} *{sev.upper()}*\n" + "\n".join(lines), 2700),
+                    },
+                }],
+            })
+
+        if report.recommended_actions:
+            rec = "\n".join(f"{i}. {a}" for i, a in enumerate(report.recommended_actions, 1))
+            attachments.append({
+                "color": "#4a5568",
+                "blocks": [{
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": f":clipboard: *Recommended Actions*\n{_trunc(rec, 1200)}"},
+                }],
+            })
+
+        attachments.append({
+            "color": "#2d3748",
+            "blocks": [{"type": "context", "elements": [{"type": "mrkdwn", "text": f"Source: {source}"}]}],
+        })
+
+        try:
+            resp = self._client.chat_postMessage(
+                channel=self.channel,
+                text=f"{emoji} {title}",
+                attachments=attachments,
+            )
+            return resp["ts"]
+        except Exception as e:
+            log.error("Slack post failed: %s", e)
+            return None
+
     def send_health_report(
         self,
         summary: str,
         has_issues: bool = False,
         source: str = "scheduled",
     ) -> Optional[str]:
-        """Send a periodic health report — green if clean, yellow/red if issues found."""
+        """Send a periodic health report from free text.
+
+        Legacy path: regex-parses `[CRITICAL]`/`[WARNING]`/`[INFO]` section markers
+        out of an agent-produced markdown string. Prefer send_structured_report,
+        which renders from a typed HealthReport. Still used for the main agent's
+        final text summary (api.py)."""
         if not self.enabled:
             log.info("[SLACK DISABLED] Health report (has_issues=%s)", has_issues)
             return None
@@ -216,6 +311,33 @@ class SlackNotifier:
             },
         ]
         return self._post(blocks=blocks, color="#d69e2e", text=":warning: Approval Required")
+
+    def mark_hitl_processing(self, message_ts: str, actor: str, action: str):
+        """Swap the Approve/Reject buttons for an in-flight 'processing' state.
+
+        Called immediately on button click so the user can't double-click and gets
+        instant visual feedback. update_hitl_resolved is called later with the
+        final outcome.
+        """
+        if not self.enabled or not message_ts:
+            return
+        try:
+            self._client.chat_update(
+                channel=self.channel,
+                ts=message_ts,
+                blocks=[
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": f":hourglass_flowing_sand: *{action} from* `{actor}` *received — processing…*",
+                        },
+                    },
+                ],
+                text=f":hourglass_flowing_sand: {action} processing",
+            )
+        except Exception as e:
+            log.warning("Failed to mark HITL processing: %s", e)
 
     def update_hitl_resolved(
         self,

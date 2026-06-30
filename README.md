@@ -7,7 +7,8 @@ An autonomous Kubernetes SRE agent. It monitors cluster health, diagnoses issues
 - **Autonomous health audits** — pods, scaling, resources, logs, security, reliability, config hygiene, and batch jobs analyzed in parallel by specialized subagents
 - **Human-in-the-loop (HITL)** — every write operation (restart, scale, patch) pauses for explicit approval
 - **Slack integration** — alerts, health reports, and HITL approve/reject buttons via Socket Mode (no public ingress needed)
-- **Scheduled monitoring** — periodic cluster health checks on a configurable interval
+- **Scheduled monitoring** — periodic cluster health checks on a configurable interval. The scheduler collects cluster state directly via the Kubernetes client (no LLM tokens), then makes a single structured-output call to summarize findings
+- **Structured findings** — health analysis returns a typed `HealthReport` (see `schemas.py`) rather than free text, so Slack rendering reads typed fields instead of parsing markdown
 - **Two interfaces** — CLI for interactive use, FastAPI + web UI for in-cluster deployment
 - **LangSmith tracing** — full observability of every agent run, with an eval dataset and online evaluators
 
@@ -138,8 +139,10 @@ agent.py              Main SRE orchestrator
 api.py                FastAPI server (SSE streaming, HITL endpoints, web UI)
 main.py               CLI entry point
 config.py             Env-based configuration
-scheduler.py          Periodic health check scheduler
+schemas.py            Pydantic models (Finding, HealthReport) — structured-output contract
+scheduler.py          Periodic health check scheduler (structured HealthReport via tool-use)
 slack_notifier.py     Slack Block Kit messages and HITL action handling
+                      (send_structured_report renders typed findings directly)
 deploy.sh             Build, push to ECR, and deploy to EKS
 tools/
   kubernetes_read.py        Read-only kubectl tools
