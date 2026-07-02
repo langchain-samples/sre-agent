@@ -8,6 +8,9 @@ from kubernetes.client.rest import ApiException
 from .k8s_client import core_v1, apps_v1, autoscaling_v2, networking_v1, custom_objects, apiextensions_v1
 
 
+ALL_NS_SENTINELS = {"", "*", "all", "--all-namespaces"}
+
+
 def _age(ts) -> str:
     if ts is None:
         return "unknown"
@@ -192,7 +195,7 @@ def kubectl_get_pod_logs(
 
 @tool
 def kubectl_get_deployments(namespace: str = "default") -> str:
-    """List all deployments — shows desired, ready, up-to-date, and available replicas."""
+    """List all deployments — shows desired, ready, up-to-date, and available replicas. This tool operates on a single namespace only. To list across the cluster, call kubectl_get_namespaces first and iterate."""
     def _run():
         items = apps_v1().list_namespaced_deployment(namespace).items
         lines = ["NAME                          DESIRED   READY   UP-TO-DATE   AVAILABLE   AGE"]
@@ -238,15 +241,19 @@ def kubectl_describe_deployment(deployment_name: str, namespace: str = "default"
 
 @tool
 def kubectl_get_hpa(namespace: str = "default") -> str:
-    """
-    List HorizontalPodAutoscalers — shows min/max replicas, current replicas,
-    and target vs current CPU utilization.
-    """
+    """List HorizontalPodAutoscalers — shows min/max replicas, current replicas, and target vs current CPU utilization. Set `namespace` to `''` or `'--all-namespaces'` to list across every namespace at once."""
     def _run():
-        items = autoscaling_v2().list_namespaced_horizontal_pod_autoscaler(namespace).items
-        if not items:
-            return f"No HPAs found in namespace '{namespace}'"
-        lines = ["NAME                    TARGET              MIN   MAX   REPLICAS   CPU%    AGE"]
+        all_ns = namespace in ALL_NS_SENTINELS
+        if all_ns:
+            items = autoscaling_v2().list_horizontal_pod_autoscaler_for_all_namespaces().items
+            if not items:
+                return "No HPAs found in all namespaces"
+            lines = ["NAMESPACE            NAME                    TARGET              MIN   MAX   REPLICAS   CPU%    AGE"]
+        else:
+            items = autoscaling_v2().list_namespaced_horizontal_pod_autoscaler(namespace).items
+            if not items:
+                return f"No HPAs found in namespace '{namespace}'"
+            lines = ["NAME                    TARGET              MIN   MAX   REPLICAS   CPU%    AGE"]
         for h in items:
             target = h.spec.scale_target_ref.name if h.spec.scale_target_ref else "?"
             min_r = h.spec.min_replicas or 1
@@ -259,20 +266,23 @@ def kubectl_get_hpa(namespace: str = "default") -> str:
                     if m.type == "Resource" and m.resource and m.resource.name == "cpu":
                         util = m.resource.current.average_utilization
                         cpu_str = f"{util}%" if util is not None else "?"
-            lines.append(
-                f"{h.metadata.name:<24} {target:<19} {min_r:<5} {max_r:<5} "
-                f"{current:<10} {cpu_str:<7} {_age(h.metadata.creation_timestamp)}"
-            )
+            if all_ns:
+                lines.append(
+                    f"{h.metadata.namespace:<21} {h.metadata.name:<24} {target:<19} {min_r:<5} {max_r:<5} "
+                    f"{current:<10} {cpu_str:<7} {_age(h.metadata.creation_timestamp)}"
+                )
+            else:
+                lines.append(
+                    f"{h.metadata.name:<24} {target:<19} {min_r:<5} {max_r:<5} "
+                    f"{current:<10} {cpu_str:<7} {_age(h.metadata.creation_timestamp)}"
+                )
         return "\n".join(lines)
     return _safe(_run)
 
 
 @tool
 def kubectl_get_events(namespace: str = "default", warning_only: bool = False) -> str:
-    """
-    Get recent Kubernetes events sorted by time.
-    Set warning_only=True to show only Warning events.
-    """
+    """Get recent Kubernetes events sorted by time. Set warning_only=True to show only Warning events. This tool operates on a single namespace only. To list across the cluster, call kubectl_get_namespaces first and iterate."""
     def _run():
         field_selector = "type=Warning" if warning_only else ""
         kwargs: dict = dict(namespace=namespace)
@@ -291,7 +301,7 @@ def kubectl_get_events(namespace: str = "default", warning_only: bool = False) -
 
 @tool
 def kubectl_get_services(namespace: str = "default") -> str:
-    """List all services — shows type, cluster IP, external IP, and ports."""
+    """List all services — shows type, cluster IP, external IP, and ports. This tool operates on a single namespace only. To list across the cluster, call kubectl_get_namespaces first and iterate."""
     def _run():
         items = core_v1().list_namespaced_service(namespace).items
         lines = ["NAME                      TYPE          CLUSTER-IP      EXTERNAL-IP     PORT(S)"]
@@ -313,7 +323,7 @@ def kubectl_get_services(namespace: str = "default") -> str:
 
 @tool
 def kubectl_get_ingress(namespace: str = "default") -> str:
-    """List all ingress resources — shows hosts, paths, and backends."""
+    """List all ingress resources — shows hosts, paths, and backends. This tool operates on a single namespace only. To list across the cluster, call kubectl_get_namespaces first and iterate."""
     def _run():
         items = networking_v1().list_namespaced_ingress(namespace).items
         if not items:
@@ -338,27 +348,41 @@ def kubectl_get_ingress(namespace: str = "default") -> str:
 
 @tool
 def kubectl_get_pvc(namespace: str = "default") -> str:
-    """List PersistentVolumeClaims — shows status, capacity, access modes, and storage class."""
+    """List PersistentVolumeClaims — shows status, capacity, access modes, and storage class. Set `namespace` to `''` or `'--all-namespaces'` to list across every namespace at once."""
     def _run():
-        items = core_v1().list_namespaced_persistent_volume_claim(namespace).items
-        if not items:
-            return f"No PVCs in namespace '{namespace}'"
-        lines = ["NAME                    STATUS   CAPACITY   ACCESS MODES   STORAGECLASS   AGE"]
+        all_ns = namespace in ALL_NS_SENTINELS
+        if all_ns:
+            items = core_v1().list_persistent_volume_claim_for_all_namespaces().items
+            if not items:
+                return "No PVCs in all namespaces"
+            lines = ["NAMESPACE            NAME                    STATUS   CAPACITY   ACCESS MODES   STORAGECLASS   AGE"]
+        else:
+            items = core_v1().list_namespaced_persistent_volume_claim(namespace).items
+            if not items:
+                return f"No PVCs in namespace '{namespace}'"
+            lines = ["NAME                    STATUS   CAPACITY   ACCESS MODES   STORAGECLASS   AGE"]
         for pvc in items:
             capacity = (pvc.status.capacity or {}).get("storage", "?")
             access = ",".join(pvc.spec.access_modes or [])
-            lines.append(
-                f"{pvc.metadata.name:<24} {pvc.status.phase:<8} {capacity:<10} "
-                f"{access:<14} {pvc.spec.storage_class_name or '<none>':<14} "
-                f"{_age(pvc.metadata.creation_timestamp)}"
-            )
+            if all_ns:
+                lines.append(
+                    f"{pvc.metadata.namespace:<21} {pvc.metadata.name:<24} {pvc.status.phase:<8} {capacity:<10} "
+                    f"{access:<14} {pvc.spec.storage_class_name or '<none>':<14} "
+                    f"{_age(pvc.metadata.creation_timestamp)}"
+                )
+            else:
+                lines.append(
+                    f"{pvc.metadata.name:<24} {pvc.status.phase:<8} {capacity:<10} "
+                    f"{access:<14} {pvc.spec.storage_class_name or '<none>':<14} "
+                    f"{_age(pvc.metadata.creation_timestamp)}"
+                )
         return "\n".join(lines)
     return _safe(_run)
 
 
 @tool
 def kubectl_get_resource_quotas(namespace: str = "default") -> str:
-    """Show ResourceQuotas — used vs hard limits for CPU, memory, and object counts."""
+    """Show ResourceQuotas — used vs hard limits for CPU, memory, and object counts. This tool operates on a single namespace only. To list across the cluster, call kubectl_get_namespaces first and iterate."""
     def _run():
         items = core_v1().list_namespaced_resource_quota(namespace).items
         if not items:
@@ -498,7 +522,7 @@ def kubectl_top_nodes() -> str:
 
 @tool
 def kubectl_get_configmaps(namespace: str = "default") -> str:
-    """List all ConfigMaps in a namespace with their key count and age."""
+    """List all ConfigMaps in a namespace with their key count and age. This tool operates on a single namespace only. To list across the cluster, call kubectl_get_namespaces first and iterate."""
     def _run():
         items = core_v1().list_namespaced_config_map(namespace).items
         if not items:
@@ -534,7 +558,7 @@ def kubectl_get_configmap(configmap_name: str, namespace: str = "default") -> st
 
 @tool
 def kubectl_get_statefulsets(namespace: str = "default") -> str:
-    """List all StatefulSets — shows desired, ready replicas, and service name."""
+    """List all StatefulSets — shows desired, ready replicas, and service name. This tool operates on a single namespace only. To list across the cluster, call kubectl_get_namespaces first and iterate."""
     def _run():
         items = apps_v1().list_namespaced_stateful_set(namespace).items
         if not items:
@@ -553,7 +577,7 @@ def kubectl_get_statefulsets(namespace: str = "default") -> str:
 
 @tool
 def kubectl_get_daemonsets(namespace: str = "default") -> str:
-    """List all DaemonSets — shows desired, current, ready, and available counts."""
+    """List all DaemonSets — shows desired, current, ready, and available counts. This tool operates on a single namespace only. To list across the cluster, call kubectl_get_namespaces first and iterate."""
     def _run():
         items = apps_v1().list_namespaced_daemon_set(namespace).items
         if not items:
