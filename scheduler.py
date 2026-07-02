@@ -11,6 +11,7 @@ import logging
 import os
 import uuid
 from datetime import datetime, timezone
+import anthropic
 from langsmith import traceable
 from langsmith.wrappers import wrap_anthropic
 
@@ -213,7 +214,6 @@ def _analyse_with_haiku(snapshot: str) -> "HealthReport":
     Uses forced tool-use so the model returns a validated HealthReport rather
     than free text that has to be regex-parsed downstream.
     """
-    import anthropic
     from schemas import HealthReport
 
     client = wrap_anthropic(anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY", "")))
@@ -330,8 +330,19 @@ class MonitoringScheduler:
 
             if self._notifier.enabled:
                 self._notifier.send_structured_report(report, source="scheduled")
+            self._consecutive_auth_failures = 0
         except Exception as e:
             log.exception("Scheduled health check failed (session=%s)", session_id)
+            if isinstance(e, anthropic.AuthenticationError):
+                self._consecutive_auth_failures = getattr(self, "_consecutive_auth_failures", 0) + 1
+                if self._consecutive_auth_failures >= 2 and self._notifier.enabled:
+                    self._notifier.send_alert(
+                        "critical",
+                        "SRE Bot — ANTHROPIC_API_KEY rejected",
+                        f"{self._consecutive_auth_failures} consecutive scheduled checks failed with 401 invalid x-api-key. Rotate the key.",
+                    )
+            else:
+                self._consecutive_auth_failures = 0
             if self._notifier.enabled:
                 self._notifier.send_alert(
                     "critical",

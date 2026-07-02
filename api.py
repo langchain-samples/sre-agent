@@ -441,6 +441,22 @@ def _start_slack_bolt(main_loop: asyncio.AbstractEventLoop):
 from contextlib import asynccontextmanager
 
 
+def _preflight_anthropic():
+    """Fail fast at boot if ANTHROPIC_API_KEY is missing or rejected."""
+    import anthropic
+
+    key = os.getenv("ANTHROPIC_API_KEY", "").strip()
+    if not key:
+        raise RuntimeError("ANTHROPIC_API_KEY is not set — refusing to start scheduler")
+    try:
+        anthropic.Anthropic(api_key=key).models.list(limit=1)
+    except anthropic.AuthenticationError as e:
+        raise RuntimeError(
+            f"ANTHROPIC_API_KEY rejected by Anthropic (401): {e}. "
+            "Rotate the key in the deployment secret and restart."
+        ) from e
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _notifier, _agent, _scheduler
@@ -462,6 +478,7 @@ async def lifespan(app: FastAPI):
     threading.Thread(target=_start_slack_bolt, args=(main_loop,), daemon=True).start()
 
     # 5. Monitoring scheduler
+    _preflight_anthropic()
     from scheduler import MonitoringScheduler
     interval = int(os.getenv("MONITOR_INTERVAL_MINUTES", "30"))
     _scheduler = MonitoringScheduler(_agent, _notifier, interval_minutes=interval)
