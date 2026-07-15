@@ -1,0 +1,31 @@
+build_blog_docx.py
+  s_a5506b09796f6a::t_7a7cceaa00eaf5 52-59,80-86,89-91,99-105,110,112-114,117,119-122,125,127-131,137-183,189-232,238-259,267-270
+  s_a5506b09796f6a::t_9c4a4d6da88ad1 233-234
+  s_6488ee64842103::t_be80bf99bf1cd0 1-11,25-51,60-78,92-98,106-109,111,115-116,118,123-124,126,132-136,184-188,235-237,260-266,271-275
+  s_a5506b09796f6a::t_9433cded556f35 12-24
+  s_a5506b09796f6a::t_dc6d9f5e1946e0 79,87-88
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "98b2bd3a678c0356b1ff81de66869e54ccab2dd4",
+  "prompts": {},
+  "sessions": {
+    "s_6488ee64842103": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7caf64a6-5484-45de-9d0d-6bf2d349dad5",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Eric Johanson <eric.johanson@langchain.dev>"
+    },
+    "s_a5506b09796f6a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "af1d05c7-d044-46af-b076-52dcdc123ed1",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Eric Johanson <eric.johanson@langchain.dev>"
+    }
+  }
+}
