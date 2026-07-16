@@ -1,0 +1,48 @@
+config.py
+  s_8bad50ea28be9e::t_bed01a076a3492 20-54
+agent.py
+  s_8bad50ea28be9e::t_f7611d1b617b0f 6-10,12-20,24-76
+  s_8bad50ea28be9e::t_fa534fe4d03352 155
+  s_8bad50ea28be9e::t_adc44aea261283 77
+main.py
+  s_8bad50ea28be9e::t_9c83837a1b84d5 131,134
+api.py
+  s_8bad50ea28be9e::t_58a5a9eb7c303f 22-23
+  s_8bad50ea28be9e::t_176fa1ffa30526 194
+  s_8bad50ea28be9e::t_7302aaca3a4823 287
+  s_8bad50ea28be9e::t_8409d32d0f9f10 655
+  s_8bad50ea28be9e::t_6535093635edda 178
+  s_8bad50ea28be9e::t_557c31b807495f 574
+  s_8bad50ea28be9e::t_83df7c82271ff8 310
+  s_8bad50ea28be9e::t_a2e9c45974fc85 53-54,75-90,93-95,312,317,409-411,440-442,619-622,634-636
+scheduler.py
+  s_5951e970250634::t_86d58ac972701c 236,248,253,255-275,278
+slack_notifier.py
+  s_5951e970250634::t_0b312dd41419ed 106-112,114,156
+k8s/deployment.yaml
+  s_8bad50ea28be9e::t_3bb5d3fa6c5678 52-53,56,60
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "c534d34d6abcd11a7ab8ca25f10c0e4961ff931d",
+  "prompts": {},
+  "sessions": {
+    "s_5951e970250634": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c2e2beea-a09b-41af-98c0-1bd11bebccdf",
+        "model": "unknown"
+      },
+      "human_author": "Eric Johanson <eric.johanson@langchain.dev>"
+    },
+    "s_8bad50ea28be9e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9a5c1d34-e049-4cd8-8d1e-09f256c1b46b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Eric Johanson <eric.johanson@langchain.dev>"
+    }
+  }
+}
