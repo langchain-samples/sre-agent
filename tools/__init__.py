@@ -56,6 +56,7 @@ from .helm import (
     helm_rollback_release,
     helm_release_history,
     helm_add_repo,
+    helm_uninstall_release,
 )
 from .kubernetes_write import (
     kubectl_scale_deployment,
@@ -73,6 +74,7 @@ from .kubernetes_write import (
     kubectl_delete_custom_resource,
     kubectl_scale_bulk,
     kubectl_delete_resources_bulk,
+    kubectl_delete_namespace,
 )
 
 HELM_READ_TOOLS = [
@@ -89,6 +91,7 @@ HELM_WRITE_TOOLS = [
     helm_upgrade_release,
     helm_rollback_release,
     helm_add_repo,
+    helm_uninstall_release,
 ]
 
 READ_TOOLS = [
@@ -152,6 +155,7 @@ WRITE_TOOLS = [
     kubectl_delete_custom_resource,
     kubectl_scale_bulk,
     kubectl_delete_resources_bulk,
+    kubectl_delete_namespace,
     *HELM_WRITE_TOOLS,
 ]
 

@@ -20,6 +20,8 @@ from tools import (
     kubectl_cordon_node,
     kubectl_uncordon_node,
     kubectl_rollout_restart,
+    kubectl_delete_namespace,
+    helm_uninstall_release,
 )
 
 # All write tool names require human approval
@@ -35,6 +37,8 @@ CHANGE_EXECUTOR_INTERRUPT_ON = {
     "kubectl_cordon_node": True,
     "kubectl_uncordon_node": True,
     "kubectl_rollout_restart": True,
+    "kubectl_delete_namespace": True,
+    "helm_uninstall_release": True,
 }
 
 change_executor_subagent = {
@@ -99,6 +103,8 @@ change_executor_subagent = {
         kubectl_cordon_node,
         kubectl_uncordon_node,
         kubectl_rollout_restart,
+        kubectl_delete_namespace,
+        helm_uninstall_release,
     ],
     "interrupt_on": CHANGE_EXECUTOR_INTERRUPT_ON,
 }

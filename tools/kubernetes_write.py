@@ -160,6 +160,19 @@ def kubectl_delete_pod(pod_name: str, namespace: str, force: bool = False) -> st
 
 
 @tool
+def kubectl_delete_namespace(namespace: str) -> str:
+    """
+    Delete a Kubernetes namespace and everything inside it (deployments, pods,
+    services, PVCs, configmaps, etc.). This is irreversible.
+    REQUIRES HUMAN APPROVAL before execution.
+    """
+    def _run():
+        core_v1().delete_namespace(namespace)
+        return f"Deleting namespace {namespace} (and all resources within it)."
+    return _safe(_run)
+
+
+@tool
 def kubectl_apply_manifest(manifest_yaml: str) -> str:
     """
     Apply a Kubernetes manifest (YAML string) to the cluster — create or update.

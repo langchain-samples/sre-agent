@@ -281,3 +281,17 @@ def helm_add_repo(repo_name: str, repo_url: str) -> str:
         return output
     _helm("repo", "update", timeout=60)
     return f"Added repo '{repo_name}' ({repo_url}) and updated cache."
+
+
+@tool
+def helm_uninstall_release(release_name: str, namespace: str = "default") -> str:
+    """
+    Uninstall a Helm release, removing all of its Kubernetes resources.
+    release_name: existing release name
+    namespace: release namespace
+    REQUIRES HUMAN APPROVAL before execution.
+    """
+    ok, output = _helm("uninstall", release_name, "--namespace", namespace, timeout=360)
+    if not ok:
+        return output
+    return output or f"Uninstalled release '{release_name}' from namespace '{namespace}'."
