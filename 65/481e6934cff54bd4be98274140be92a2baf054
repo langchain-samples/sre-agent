@@ -1,0 +1,35 @@
+tools/__init__.py
+  s_9a20e99cd9b9f5::t_b8ca527b5b107d 73
+  s_9a20e99cd9b9f5::t_eb4dc8f84325e3 152
+subagents/change_executor.py
+  s_9a20e99cd9b9f5::t_1ffda07c3dd796 89,94
+  s_9a20e99cd9b9f5::t_dafb292fb3110d 10,15
+  s_9a20e99cd9b9f5::t_338cbf7824b2dc 30
+  s_9a20e99cd9b9f5::t_0be5d07ce6e5f6 60-67
+tools/kubernetes_write.py
+  s_9a20e99cd9b9f5::t_0226b6b9e66bc8 554,556-557,560-562
+  s_9a20e99cd9b9f5::t_e17328c37a5865 595-615
+  s_9a20e99cd9b9f5::t_a2f2b5db2cedf8 468-469,475-506
+  s_9a20e99cd9b9f5::t_236e59f8b5143e 507-509
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "65481e6934cff54bd4be98274140be92a2baf054",
+  "prompts": {},
+  "humans": {
+    "h_c42507586cfcb5": {
+      "author": "Eric Johanson <eric.johanson@langchain.dev>"
+    }
+  },
+  "sessions": {
+    "s_9a20e99cd9b9f5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b8697d43-8eb2-4d44-9e51-6e9edaae7936",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Eric Johanson <eric.johanson@langchain.dev>"
+    }
+  }
+}
