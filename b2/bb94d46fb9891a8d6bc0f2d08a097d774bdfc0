@@ -1,0 +1,27 @@
+README.md
+  s_9a20e99cd9b9f5::t_ddf008632b90a6 159-161
+  s_9a20e99cd9b9f5::t_3aa4b9bc989bf3 26-29
+  s_9a20e99cd9b9f5::t_fe098bc8b1adee 8-12
+  s_9a20e99cd9b9f5::t_4f431d135de3df 73-74
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "b2bb94d46fb9891a8d6bc0f2d08a097d774bdfc0",
+  "prompts": {},
+  "humans": {
+    "h_c42507586cfcb5": {
+      "author": "Eric Johanson <eric.johanson@langchain.dev>"
+    }
+  },
+  "sessions": {
+    "s_9a20e99cd9b9f5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b8697d43-8eb2-4d44-9e51-6e9edaae7936",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Eric Johanson <eric.johanson@langchain.dev>"
+    }
+  }
+}
