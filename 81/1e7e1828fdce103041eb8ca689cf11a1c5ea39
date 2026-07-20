@@ -1,0 +1,30 @@
+.env.example
+  s_0de00690134c7a::t_921335bf981e86 3-4
+  s_0de00690134c7a::t_0e11a559194085 5-6
+.dockerignore
+  s_0de00690134c7a::t_6755cdae0ba21f 4
+k8s/deployment.yaml
+  s_0de00690134c7a::t_c071b4c61b112c 43-47
+  s_0de00690134c7a::t_bb256fa4eb865b 38-42
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "811e7e1828fdce103041eb8ca689cf11a1c5ea39",
+  "prompts": {},
+  "humans": {
+    "h_c42507586cfcb5": {
+      "author": "Eric Johanson <eric.johanson@langchain.dev>"
+    }
+  },
+  "sessions": {
+    "s_0de00690134c7a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "031955cb-aee9-4423-968c-924fd60d4446",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Eric Johanson <eric.johanson@langchain.dev>"
+    }
+  }
+}
