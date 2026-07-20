@@ -1,0 +1,41 @@
+scheduler.py
+  s_9a20e99cd9b9f5::t_0bbbb5bb1228f9 284-299
+  s_9a20e99cd9b9f5::t_c1563d4e602a07 358
+slack_notifier.py
+  s_9a20e99cd9b9f5::t_d35c339fa5b4e6 80-81,88-91
+  s_9a20e99cd9b9f5::t_66b9f029187093 346
+  s_9a20e99cd9b9f5::t_c77ddd6a5a55fc 425
+  s_9a20e99cd9b9f5::t_52fe4ec114cdab 28-31
+  s_9a20e99cd9b9f5::t_5ccc1ee839cbb5 342-344,349-361
+  s_9a20e99cd9b9f5::t_abf4a99dce41c3 387
+  s_9a20e99cd9b9f5::t_a7828bf4067753 172-173
+  s_9a20e99cd9b9f5::t_2b226eaaba4304 384-385,390-403
+  s_9a20e99cd9b9f5::t_cf6617ec75657e 162-169,171
+api.py
+  s_9a20e99cd9b9f5::t_d318c92f2fbf7e 310-347
+  s_9a20e99cd9b9f5::t_0ae3df0e529bfb 436-442
+  s_9a20e99cd9b9f5::t_3005c6b05ce983 7
+  s_9a20e99cd9b9f5::t_0db083aec8d0d9 30-42
+  s_9a20e99cd9b9f5::t_6fb608d22f8eb5 348-350
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "fa46e5295f85314ff186dbec522919bebe9c0a67",
+  "prompts": {},
+  "humans": {
+    "h_c42507586cfcb5": {
+      "author": "Eric Johanson <eric.johanson@langchain.dev>"
+    }
+  },
+  "sessions": {
+    "s_9a20e99cd9b9f5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b8697d43-8eb2-4d44-9e51-6e9edaae7936",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Eric Johanson <eric.johanson@langchain.dev>"
+    }
+  }
+}
