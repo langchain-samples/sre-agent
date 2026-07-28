@@ -36,10 +36,11 @@ def _age(ts) -> str:
 def _collect_cluster_data() -> dict:
     """Collect raw cluster state using the kubernetes Python client directly.
 
-    Returns a dict with keys: nodes, pods, events, hpas, deployments, errors.
+    Returns a dict with keys: nodes, pods, events, hpas, deployments,
+    node_metrics, pod_metrics, errors.
     No LLM calls are made here.
     """
-    from tools.k8s_client import core_v1, apps_v1, autoscaling_v2
+    from tools.k8s_client import core_v1, apps_v1, autoscaling_v2, custom_objects
     from kubernetes.client.rest import ApiException
 
     result: dict = {
@@ -49,6 +50,8 @@ def _collect_cluster_data() -> dict:
         "events": [],
         "hpas": [],
         "deployments": [],
+        "node_metrics": [],
+        "pod_metrics": {},
         "errors": [],
     }
 
@@ -64,6 +67,21 @@ def _collect_cluster_data() -> dict:
             })
     except Exception as e:
         result["errors"].append(f"nodes: {e}")
+
+    # --- Node utilization (metrics.k8s.io) ---
+    try:
+        node_metrics = custom_objects().list_cluster_custom_object(
+            "metrics.k8s.io", "v1beta1", "nodes"
+        )
+        for n in node_metrics.get("items", []):
+            usage = n.get("usage", {})
+            result["node_metrics"].append({
+                "name": n["metadata"]["name"],
+                "cpu": usage.get("cpu", "?"),
+                "memory": usage.get("memory", "?"),
+            })
+    except Exception as e:
+        result["errors"].append(f"node_metrics: {e}")
 
     # --- Pods (all namespaces) ---
     try:
@@ -96,6 +114,29 @@ def _collect_cluster_data() -> dict:
                 result["unhealthy_pods"].append(pod_info)
     except Exception as e:
         result["errors"].append(f"pods: {e}")
+
+    # --- Pod utilization (metrics.k8s.io) ---
+    try:
+        pod_metrics = custom_objects().list_cluster_custom_object(
+            "metrics.k8s.io", "v1beta1", "pods"
+        )
+        for p in pod_metrics.get("items", []):
+            containers = p.get("containers", [])
+            total_cpu = sum(
+                int(c["usage"]["cpu"].rstrip("n")) for c in containers
+                if c.get("usage", {}).get("cpu", "").endswith("n")
+            )
+            total_mem_ki = sum(
+                int(c["usage"]["memory"].rstrip("Ki")) for c in containers
+                if c.get("usage", {}).get("memory", "").endswith("Ki")
+            )
+            key = f"{p['metadata']['namespace']}/{p['metadata']['name']}"
+            result["pod_metrics"][key] = {
+                "cpu": f"{total_cpu}n",
+                "memory": f"{total_mem_ki}Ki",
+            }
+    except Exception as e:
+        result["errors"].append(f"pod_metrics: {e}")
 
     # --- Recent warning events (last 20) ---
     try:
@@ -130,6 +171,8 @@ def _collect_cluster_data() -> dict:
                 "max": spec.max_replicas,
                 "current": status.current_replicas if status else "?",
                 "desired": status.desired_replicas if status else "?",
+                "current_metrics": (status.current_metrics if status else None),
+                "target_metrics": spec.metrics,
             })
     except Exception as e:
         result["errors"].append(f"hpas: {e}")
@@ -154,6 +197,50 @@ def _collect_cluster_data() -> dict:
     return result
 
 
+def _hpa_metric_part(m, field: str) -> tuple:
+    """Pull (metric name, formatted value) out of an autoscaling/v2 metric spec or status."""
+    for kind in ("resource", "container_resource", "pods", "external", "object"):
+        block = getattr(m, kind, None)
+        if block is None:
+            continue
+        name = (
+            getattr(block, "name", None)
+            or getattr(getattr(block, "metric", None), "name", None)
+            or kind
+        )
+        holder = getattr(block, field, None)
+        if holder is None:
+            return (name, None)
+        util = getattr(holder, "average_utilization", None)
+        if util is not None:
+            return (name, f"{util}%")
+        val = getattr(holder, "average_value", None) or getattr(holder, "value", None)
+        if val is not None:
+            return (name, str(val))
+        return (name, None)
+    return (None, None)
+
+
+def _format_hpa_metrics(h: dict) -> str:
+    """Render an HPA's current-vs-target metric, or "" when no metrics were collected."""
+    current = h.get("current_metrics") or []
+    target = h.get("target_metrics") or []
+    if not current and not target:
+        return ""
+    try:
+        name, cur = _hpa_metric_part(current[0], "current") if current else (None, None)
+        target_name, tgt = _hpa_metric_part(target[0], "target") if target else (None, None)
+    except Exception:
+        return ""
+    label = name or target_name
+    if not label or (cur is None and tgt is None):
+        return ""
+    parts = [f"{label} {cur}" if cur is not None else label]
+    if tgt is not None:
+        parts.append(f"target {tgt}")
+    return f" ({'/'.join(parts)})"
+
+
 def _format_snapshot(data: dict) -> str:
     """Convert the raw cluster data dict into a compact text snapshot for the LLM."""
     lines = []
@@ -162,6 +249,12 @@ def _format_snapshot(data: dict) -> str:
     lines.append("=== NODES ===")
     for n in data["nodes"]:
         lines.append(f"  {n['name']}  {n['status']}  {n['version']}")
+
+    # Node utilization
+    if data.get("node_metrics"):
+        lines.append("\n=== NODE UTILIZATION ===")
+        for n in data["node_metrics"]:
+            lines.append(f"  {n['name']}  cpu={n['cpu']}  memory={n['memory']}")
 
     # Deployments
     lines.append("\n=== DEPLOYMENTS ===")
@@ -175,8 +268,10 @@ def _format_snapshot(data: dict) -> str:
     if data["unhealthy_pods"]:
         lines.append("\n=== UNHEALTHY PODS ===")
         for p in data["unhealthy_pods"]:
+            usage = (data.get("pod_metrics") or {}).get(f"{p['namespace']}/{p['name']}")
+            util = f"  cpu={usage['cpu']} memory={usage['memory']}" if usage else ""
             lines.append(
-                f"  {p['namespace']}/{p['name']}  {p['status']}  restarts={p['restarts']}  age={p['age']}"
+                f"  {p['namespace']}/{p['name']}  {p['status']}  restarts={p['restarts']}  age={p['age']}{util}"
             )
     else:
         total = len(data["pods"])
@@ -187,8 +282,9 @@ def _format_snapshot(data: dict) -> str:
         lines.append("\n=== HPAs ===")
         for h in data["hpas"]:
             at_max = " ⚠ AT MAX" if h["current"] == h["max"] else ""
+            metrics = _format_hpa_metrics(h)
             lines.append(
-                f"  {h['namespace']}/{h['name']}  {h['current']}/{h['max']}{at_max}"
+                f"  {h['namespace']}/{h['name']}  {h['current']}/{h['max']}{at_max}{metrics}"
             )
 
     # Recent warning events
