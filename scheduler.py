@@ -186,9 +186,15 @@ def _format_snapshot(data: dict) -> str:
     if data["hpas"]:
         lines.append("\n=== HPAs ===")
         for h in data["hpas"]:
-            at_max = " ⚠ AT MAX" if h["current"] == h["max"] else ""
+            mn, mx = h.get("min"), h.get("max")
+            # An HPA with min == max is pinned by design (e.g. KEDA-managed) and sits
+            # at "max" on every collection, so only a scalable HPA is noteworthy here.
+            both_known = isinstance(mn, int) and isinstance(mx, int)
+            scalable = both_known and mx > mn
+            at_max = " ⚠ AT MAX" if scalable and h["current"] == mx else ""
+            fixed = " (fixed scale, cannot autoscale)" if both_known and mn == mx else ""
             lines.append(
-                f"  {h['namespace']}/{h['name']}  {h['current']}/{h['max']}{at_max}"
+                f"  {h['namespace']}/{h['name']}  {h['current']}/{mx} (min={mn}){at_max}{fixed}"
             )
 
     # Recent warning events
