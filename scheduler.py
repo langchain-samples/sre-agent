@@ -191,18 +191,33 @@ def _collect_cluster_data() -> dict:
         )
         for p in pod_metrics.get("items", []):
             containers = p.get("containers", [])
-            # Same unit handling as tools.kubernetes_read.kubectl_top_pods: the
-            # metrics API reports CPU in nanocores ("123n") and memory in KiB
-            # ("456Ki"). Entries in other units are skipped rather than guessed at.
-            total_cpu_n = sum(
-                int(c["usage"]["cpu"].rstrip("n")) for c in containers
-                if c.get("usage", {}).get("cpu", "").endswith("n")
-            )
-            total_mem_ki = sum(
-                int(c["usage"]["memory"].rstrip("Ki")) for c in containers
-                if c.get("usage", {}).get("memory", "").endswith("Ki")
-            )
             key = f"{p['metadata']['namespace']}/{p['metadata']['name']}"
+            # An unparsable quantity must poison the pod total to None: omitting
+            # it from a sum() yields 0, which is then rendered as a genuine
+            # measurement with nothing to distinguish it from a real reading.
+            total_cpu_n = 0
+            total_mem_ki = 0
+            for c in containers:
+                usage = c.get("usage", {})
+                raw_cpu, raw_mem = usage.get("cpu"), usage.get("memory")
+                cpu_m = _cpu_millicores(raw_cpu)
+                mem_ki = _memory_ki(raw_mem)
+                if cpu_m is None:
+                    if total_cpu_n is not None:
+                        result["errors"].append(
+                            f"pod metrics: unparsable cpu quantity {raw_cpu!r} for {key}"
+                        )
+                    total_cpu_n = None
+                elif total_cpu_n is not None:
+                    total_cpu_n += cpu_m * 1_000_000
+                if mem_ki is None:
+                    if total_mem_ki is not None:
+                        result["errors"].append(
+                            f"pod metrics: unparsable memory quantity {raw_mem!r} for {key}"
+                        )
+                    total_mem_ki = None
+                elif total_mem_ki is not None:
+                    total_mem_ki += mem_ki
             result["pod_metrics"][key] = {
                 "cpu_n": total_cpu_n,
                 "memory_ki": total_mem_ki,
@@ -261,6 +276,13 @@ def _fmt_mem_ki(ki) -> str:
     if ki >= 1024:
         return f"{ki / 1024:.0f}Mi"
     return f"{ki:.0f}Ki"
+
+
+def _fmt_cpu_n(cpu_n) -> str:
+    """Render nanocores as millicores, or '?' when the quantity was unparsable."""
+    if cpu_n is None:
+        return "?"
+    return f"{cpu_n / 1_000_000:.0f}m"
 
 
 def _fmt_utilization(used, total, render) -> str:
@@ -357,7 +379,7 @@ def _format_snapshot(data: dict) -> str:
         m = pod_metrics.get(f"{namespace}/{name}")
         if not m:
             return ""
-        return f"  cpu={m['cpu_n'] / 1_000_000:.0f}m mem={_fmt_mem_ki(m['memory_ki'])}"
+        return f"  cpu={_fmt_cpu_n(m['cpu_n'])} mem={_fmt_mem_ki(m['memory_ki'])}"
 
     if data["unhealthy_pods"]:
         lines.append("\n=== UNHEALTHY PODS ===")
@@ -373,11 +395,17 @@ def _format_snapshot(data: dict) -> str:
     # Busiest pods. Capped at 10 so a large cluster cannot inflate the prompt,
     # and so a hot-but-healthy pod is still visible to the analysis step.
     if pod_metrics:
-        top = sorted(pod_metrics.items(), key=lambda kv: kv[1]["cpu_n"], reverse=True)[:10]
+        # Pods whose CPU could not be parsed sort last rather than breaking the
+        # comparison against int.
+        top = sorted(
+            pod_metrics.items(),
+            key=lambda kv: (kv[1]["cpu_n"] is not None, kv[1]["cpu_n"] or 0),
+            reverse=True,
+        )[:10]
         lines.append(f"\n=== TOP PODS BY CPU (top {len(top)} of {len(pod_metrics)}) ===")
         for key, m in top:
             lines.append(
-                f"  {key}  cpu={m['cpu_n'] / 1_000_000:.0f}m  mem={_fmt_mem_ki(m['memory_ki'])}"
+                f"  {key}  cpu={_fmt_cpu_n(m['cpu_n'])}  mem={_fmt_mem_ki(m['memory_ki'])}"
             )
 
     # Node utilisation, joined to allocatable capacity so the numbers are

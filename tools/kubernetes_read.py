@@ -6,6 +6,7 @@ from typing import Optional
 from langchain.tools import tool
 from kubernetes.client.rest import ApiException
 from .k8s_client import core_v1, apps_v1, autoscaling_v2, networking_v1, custom_objects, apiextensions_v1
+from scheduler import _cpu_millicores, _fmt_mem_ki, _memory_ki
 
 
 def _age(ts) -> str:
@@ -463,15 +464,13 @@ def kubectl_top_pods(namespace: str = "default") -> str:
         for pod in items:
             name = pod["metadata"]["name"]
             containers = pod.get("containers", [])
-            total_cpu = sum(
-                int(c["usage"]["cpu"].rstrip("n")) for c in containers
-                if c["usage"]["cpu"].endswith("n")
-            )
-            total_mem_ki = sum(
-                int(c["usage"]["memory"].rstrip("Ki")) for c in containers
-                if c["usage"]["memory"].endswith("Ki")
-            )
-            lines.append(f"{name:<42} {total_cpu}n{'':5} {total_mem_ki}Ki")
+            # A quantity in an unhandled unit must never be reported as 0: a
+            # fabricated zero is indistinguishable from a genuinely idle pod.
+            cpu_values = [_cpu_millicores(c.get("usage", {}).get("cpu")) for c in containers]
+            mem_values = [_memory_ki(c.get("usage", {}).get("memory")) for c in containers]
+            cpu = "?" if any(v is None for v in cpu_values) else f"{sum(cpu_values):.0f}m"
+            mem = "?" if any(v is None for v in mem_values) else _fmt_mem_ki(sum(mem_values))
+            lines.append(f"{name:<42} {cpu:<12} {mem}")
         return "\n".join(lines)
     return _safe(_run)
 

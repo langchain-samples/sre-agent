@@ -264,6 +264,102 @@ def test_top_pods_section_absent_without_metrics():
     assert "TOP PODS BY CPU" not in _format_snapshot(base_data())
 
 
+def test_top_pods_renders_unparsed_cpu_as_unknown_and_sorts_it_last():
+    metrics = {
+        "ns/parsed": {"cpu_n": 9_000_000, "memory_ki": 1024},
+        "ns/unparsed": {"cpu_n": None, "memory_ki": None},
+    }
+    section = _format_snapshot(base_data(pod_metrics=metrics)).split("TOP PODS BY CPU")[1]
+    assert "ns/unparsed  cpu=?  mem=?" in section
+    assert section.index("ns/parsed") < section.index("ns/unparsed")
+
+
+# ---------------------------------------------------------------------------
+# Pod metric collection — an unparsable quantity must not become a zero
+# ---------------------------------------------------------------------------
+
+class _Items:
+    def __init__(self, items=None):
+        self.items = items or []
+
+
+class _StubCore:
+    def list_node(self):
+        return _Items()
+
+    def list_pod_for_all_namespaces(self):
+        return _Items()
+
+    def list_event_for_all_namespaces(self, **kwargs):
+        return _Items()
+
+
+class _StubApps:
+    def list_deployment_for_all_namespaces(self):
+        return _Items()
+
+
+class _StubAutoscaling:
+    def list_horizontal_pod_autoscaler_for_all_namespaces(self):
+        return _Items()
+
+
+class _StubCustomObjects:
+    def __init__(self, pod_items):
+        self._pod_items = pod_items
+
+    def list_cluster_custom_object(self, group, version, plural):
+        return {"items": self._pod_items if plural == "pods" else []}
+
+
+def pod_metric(name, cpu, memory, namespace="prod"):
+    return {
+        "metadata": {"namespace": namespace, "name": name},
+        "containers": [{"name": "app", "usage": {"cpu": cpu, "memory": memory}}],
+    }
+
+
+def collect(monkeypatch, pod_items):
+    from tools import k8s_client
+    import scheduler
+
+    monkeypatch.setattr(k8s_client, "core_v1", lambda: _StubCore())
+    monkeypatch.setattr(k8s_client, "apps_v1", lambda: _StubApps())
+    monkeypatch.setattr(k8s_client, "autoscaling_v2", lambda: _StubAutoscaling())
+    monkeypatch.setattr(k8s_client, "custom_objects", lambda: _StubCustomObjects(pod_items))
+    return scheduler._collect_cluster_data()
+
+
+def test_memory_reported_in_mebibytes_is_not_collapsed_to_zero(monkeypatch):
+    """The regression: a non-Ki unit was dropped from sum(), yielding mem=0Ki."""
+    data = collect(monkeypatch, [pod_metric("api-1", "9000000n", "128Mi")])
+    assert data["pod_metrics"]["prod/api-1"] == {"cpu_n": 9_000_000, "memory_ki": 131072}
+    out = _format_snapshot(data)
+    assert "prod/api-1  cpu=9m  mem=128Mi" in out
+    assert "mem=0Ki" not in out
+
+
+def test_unrecognised_memory_unit_renders_as_unknown_and_raises_a_collection_error(monkeypatch):
+    data = collect(monkeypatch, [pod_metric("api-1", "9000000n", "128Xi")])
+    assert data["pod_metrics"]["prod/api-1"]["memory_ki"] is None
+    out = _format_snapshot(data)
+    assert "prod/api-1  cpu=9m  mem=?" in out
+    errors = out.split("=== COLLECTION ERRORS ===")[1]
+    assert "prod/api-1" in errors
+    assert "128Xi" in errors
+
+
+def test_no_snapshot_line_pairs_a_nonzero_cpu_with_a_zero_memory(monkeypatch):
+    data = collect(monkeypatch, [
+        pod_metric("api-1", "9000000n", "128Mi"),
+        pod_metric("api-2", "9000000n", "43008Ki"),
+        pod_metric("api-3", "9000000n", "128Xi"),
+        pod_metric("api-4", "9000000n", "45088768"),   # bare bytes
+    ])
+    for line in _format_snapshot(data).splitlines():
+        assert not ("mem=0Ki" in line and "cpu=0m" not in line), line
+
+
 # ---------------------------------------------------------------------------
 # HealthReport validation and repair
 # ---------------------------------------------------------------------------
