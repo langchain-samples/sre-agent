@@ -223,7 +223,12 @@ def _analyse_with_haiku(snapshot: str) -> "HealthReport":
         "and produce a structured health report by calling the report_health tool. "
         "Focus on actionable issues and name specific resources. Skip healthy "
         "resources unless there is a pattern worth noting. Set overall_severity to "
-        "the highest severity among your findings, or 'ok' if the cluster is healthy."
+        "the highest severity among your findings, or 'ok' if the cluster is healthy. "
+        "Every warning or critical finding must be paired with at least one concrete "
+        "recommended action naming the resource and the change to make; "
+        "recommended_actions may only be empty when overall_severity is 'ok'. The "
+        "summary must state what is wrong and which resource is affected — never a "
+        "bare completion acknowledgement such as 'Health check completed.'"
     )
     tool = {
         "name": "report_health",
