@@ -300,13 +300,36 @@ def _metric_value(entry, current: bool):
             return str(name), f"{util}%"
         avg = getattr(side, "average_value", None)
         if avg is not None:
-            return str(name), str(avg)
+            return str(name), _render_quantity(mtype, str(name), str(avg))
         val = getattr(side, "value", None)
         if val is not None:
-            return str(name), str(val)
+            return str(name), _render_quantity(mtype, str(name), str(val))
         return None
     except Exception:
         return None
+
+
+_UNVERIFIED = " (units unverified)"
+
+
+def _render_quantity(mtype: str, name: str, raw: str) -> str:
+    """Render a resource metric Quantity in a canonical unit.
+
+    An HPA target may be expressed in bare cores ("1") while the current side
+    arrives in millicores ("4m"), so the pair is not comparable as printed.
+    Only resource/containerResource cpu and memory have a canonical unit;
+    pods/object/external metrics are dimensionless and pass through.
+    """
+    if mtype not in ("resource", "containerresource"):
+        return raw
+    lname = name.lower()
+    if lname == "cpu":
+        v = _cpu_millicores(raw)
+        return f"{v:.0f}m" if v is not None else f"{raw}{_UNVERIFIED}"
+    if lname == "memory":
+        v = _memory_ki(raw)
+        return _fmt_mem_ki(v) if v is not None else f"{raw}{_UNVERIFIED}"
+    return raw
 
 
 def _format_hpa_metrics(h: dict) -> str:

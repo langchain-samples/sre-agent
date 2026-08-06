@@ -6,6 +6,8 @@ and exotic HPA metric shapes.
 """
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from scheduler import _format_hpa_metrics, _format_snapshot, _metric_value
@@ -145,6 +147,48 @@ def test_hpa_line_in_snapshot_includes_metrics_and_at_max_flag():
     out = _format_snapshot(data)
     assert "AT MAX" in out
     assert "(cpu 12%/target 80%)" in out
+
+
+def test_resource_cpu_target_in_bare_cores_is_normalized_to_millicores():
+    """The regression: a bare-core target printed against a millicore current.
+
+    A KEDA-managed HPA can express its CPU target as the Quantity "1" (one
+    core) while the current side arrives as "4m", which read as 'cpu 4m/target
+    1' looks like a capacity problem three orders of magnitude off.
+    """
+    hpa = {
+        "current_metrics": [Entry("Resource", ResourceBlock("cpu", current=Target(average_value="4m")))],
+        "target_metrics": [Entry("Resource", ResourceBlock("cpu", target=Target(average_value="1")))],
+    }
+    out = _format_hpa_metrics(hpa)
+    assert "cpu 4m/target 1000m" in out
+    assert not re.search(r"cpu 4m/target 1(?!\d)", out)
+
+
+def test_resource_memory_quantities_are_normalized_on_both_sides():
+    hpa = {
+        "current_metrics": [Entry("Resource", ResourceBlock("memory", current=Target(average_value="524288Ki")))],
+        "target_metrics": [Entry("Resource", ResourceBlock("memory", target=Target(average_value="2Gi")))],
+    }
+    assert _format_hpa_metrics(hpa) == " (memory 512Mi/target 2.0Gi)"
+
+
+def test_non_resource_metric_keeps_its_bare_number():
+    """pods/object/external metrics are dimensionless, so nothing to normalize."""
+    hpa = {
+        "current_metrics": [Entry("External", ExternalBlock("s1-postgresql", current=Target(average_value="0")))],
+        "target_metrics": [Entry("External", ExternalBlock("s1-postgresql", target=Target(average_value="7")))],
+    }
+    assert _format_hpa_metrics(hpa) == " (s1-postgresql 0/target 7)"
+
+
+def test_unparseable_resource_quantity_is_tagged_rather_than_compared():
+    hpa = {
+        "current_metrics": [Entry("Resource", ResourceBlock("cpu", current=Target(average_value="4m")))],
+        "target_metrics": [Entry("Resource", ResourceBlock("cpu", target=Target(average_value="12x")))],
+    }
+    out = _format_hpa_metrics(hpa)
+    assert "cpu 4m/target 12x (units unverified)" in out
 
 
 def test_hpa_without_metrics_renders_exactly_as_before():
