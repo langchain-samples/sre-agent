@@ -1,0 +1,27 @@
+tools/kubernetes_write.py
+  s_ff2a811e653094::t_8963a48a606820 4,163-259
+  s_ff2a811e653094::t_873fb15147e24e 649-664,687-708
+  s_ff2a811e653094::t_effc4a5ab08f43 260-262
+subagents/change_executor.py
+  s_ff2a811e653094::t_53523e848d6046 23-24,40-41,58,61-63,108-109
+tools/__init__.py
+  s_ff2a811e653094::t_53523e848d6046 76,156
+tests/test_write_guardrails.py
+  s_ff2a811e653094::t_0bd8ae50b30fbe 1-191
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "46728600559d17534c15bccef157adcb0a9149f2",
+  "prompts": {},
+  "sessions": {
+    "s_ff2a811e653094": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7993d812-ea5c-42dc-b0c3-b97e856ff1bc",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Eric Johanson <eric.johanson@langchain.dev>"
+    }
+  }
+}
