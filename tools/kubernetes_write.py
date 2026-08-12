@@ -319,6 +319,12 @@ def kubectl_apply_manifest(manifest_yaml: str) -> str:
                 autoscaling_v2().create_namespaced_horizontal_pod_autoscaler,
                 autoscaling_v2().patch_namespaced_horizontal_pod_autoscaler, name
             )
+        elif kind == "PersistentVolumeClaim":
+            return (
+                "ERROR: kubectl_apply_manifest does not support "
+                "kind=PersistentVolumeClaim. To resize a PVC use "
+                "kubectl_resize_pvc(pvc_name, namespace, new_size)."
+            )
         else:
             return (
                 f"ERROR: kubectl_apply_manifest does not support kind={kind}. "
