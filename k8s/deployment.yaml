@@ -46,21 +46,25 @@ spec:
                 secretKeyRef:
                   name: sre-agent-secrets
                   key: LC_GATEWAY_KEY
+                  optional: true
             - name: ANTHROPIC_BASE_URL
               valueFrom:
                 secretKeyRef:
                   name: sre-agent-secrets
                   key: ANTHROPIC_BASE_URL
+                  optional: true
             - name: SLACK_BOT_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: sre-agent-secrets
                   key: SLACK_BOT_TOKEN
+                  optional: true
             - name: SLACK_APP_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: sre-agent-secrets
                   key: SLACK_APP_TOKEN
+                  optional: true
             - name: LANGSMITH_TRACING
               value: "true"
             - name: LANGCHAIN_TRACING_V2
@@ -69,13 +73,13 @@ spec:
               value: "sre-agent"
             - name: LANGCHAIN_PROJECT
               value: "sre-agent"
-            - name: LANGSMITH_RUNS_ENDPOINTS
+            - name: LANGSMITH_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: sre-agent-secrets
-                  key: LANGSMITH_RUNS_ENDPOINTS
+                  key: LANGSMITH_API_KEY
             - name: SLACK_CHANNEL
-              value: "#sre_alerts"
+              value: "#sre-alerts"
             - name: MONITOR_INTERVAL_MINUTES
               value: "60"                 # hourly
             - name: MONITORING_ENABLED
