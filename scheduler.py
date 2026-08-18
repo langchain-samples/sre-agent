@@ -142,6 +142,26 @@ def _classify_pod(pod, now) -> tuple[bool, str, dict]:
     return False, phase, extra
 
 
+def event_is_current(kind: str, namespace: str, object_name: str,
+                     age_min, pod_keys) -> bool:
+    """Whether a warning event still describes something happening now.
+
+    Pure and shared with the eval replay harness, so a recorded cluster snapshot
+    exercises this exact logic rather than a copy of it.
+
+    Two ways an event stops being current. It ages out, and Kubernetes keeps
+    events for an hour by default. Or the object it names is gone: an event about
+    a deleted pod cannot describe a live fault however recent it is, which is what
+    made a deleted ReplicaSet's InvalidImageName warning read as critical for the
+    better part of an hour.
+    """
+    if age_min is None or age_min > EVENT_MAX_AGE_MINUTES:
+        return False
+    if kind == "Pod" and f"{namespace}/{object_name}" not in pod_keys:
+        return False
+    return True
+
+
 def _collect_cluster_data() -> dict:
     """Collect raw cluster state using the kubernetes Python client directly.
 
@@ -220,24 +240,18 @@ def _collect_cluster_data() -> dict:
         for e in events:
             stamp = e.last_timestamp or e.event_time
             age_min = _minutes_since(stamp, now_ev)
-            if age_min > EVENT_MAX_AGE_MINUTES:
-                continue  # stale
-
-            # An event about a pod that no longer exists cannot describe a current
-            # fault, however recent it is. This is what made a deleted ReplicaSet's
-            # InvalidImageName warning read as a live critical for the better part
-            # of an hour. The pod list is already collected above, so this is free.
-            if e.involved_object.kind == "Pod":
-                key = f"{e.metadata.namespace}/{e.involved_object.name}"
-                if key not in _collected_pod_keys:
-                    continue
+            age_min = None if age_min == float("inf") else round(age_min)
+            if not event_is_current(e.involved_object.kind, e.metadata.namespace,
+                                    e.involved_object.name, age_min,
+                                    _collected_pod_keys):
+                continue
             result["events"].append({
                 "namespace": e.metadata.namespace,
                 "reason": e.reason,
                 "message": (e.message or "")[:200],
                 "object": f"{e.involved_object.kind}/{e.involved_object.name}",
                 "count": e.count or 1,
-                "age_min": None if age_min == float("inf") else round(age_min),
+                "age_min": age_min,
             })
     except Exception as e:
         result["errors"].append(f"events: {e}")
