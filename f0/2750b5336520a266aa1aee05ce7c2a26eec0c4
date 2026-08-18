@@ -1,0 +1,21 @@
+k8s/deployment.yaml
+  s_ff2a811e653094::t_3257f36e0bb755 72-76,80-85
+.env.example
+  s_ff2a811e653094::t_3257f36e0bb755 10-13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "f02750b5336520a266aa1aee05ce7c2a26eec0c4",
+  "prompts": {},
+  "sessions": {
+    "s_ff2a811e653094": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7993d812-ea5c-42dc-b0c3-b97e856ff1bc",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Eric Johanson <eric.johanson@langchain.dev>"
+    }
+  }
+}
