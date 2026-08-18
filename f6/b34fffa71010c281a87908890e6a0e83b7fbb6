@@ -1,0 +1,23 @@
+README.md
+  s_ff2a811e653094::t_862ce567a3b9ab 120-126,209
+k8s/secret.yaml.example
+  s_ff2a811e653094::t_d26cda902d6083 1-68
+deploy.sh
+  s_ff2a811e653094::t_862ce567a3b9ab 68-77,80-81,83-86
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "f6b34fffa71010c281a87908890e6a0e83b7fbb6",
+  "prompts": {},
+  "sessions": {
+    "s_ff2a811e653094": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7993d812-ea5c-42dc-b0c3-b97e856ff1bc",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Eric Johanson <eric.johanson@langchain.dev>"
+    }
+  }
+}
