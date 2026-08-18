@@ -1,0 +1,21 @@
+LICENSE
+  s_ff2a811e653094::t_7cbde4067eee79 1-21
+README.md
+  s_ff2a811e653094::t_68d1e7f7e78624 301-304
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "dc5da4d24fb1e001f7d9997a406fbecab8d9d593",
+  "prompts": {},
+  "sessions": {
+    "s_ff2a811e653094": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7993d812-ea5c-42dc-b0c3-b97e856ff1bc",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Eric Johanson <eric.johanson@langchain.dev>"
+    }
+  }
+}
