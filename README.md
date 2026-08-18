@@ -209,8 +209,9 @@ tests/
 evals/
   create_dataset.py         Script to upload eval examples to LangSmith
   sre-agent-k8s-eval.jsonl  Pre-built JSONL dataset (upload directly via LangSmith UI)
-  evaluators.py             Online evaluators
-  upload_online_evals.py    Script to register online evaluators
+  evaluators.py             Evaluators; output contract documented at the top
+  run_eval.py               Runs the offline suite against the agent
+  upload_online_evals.py    Registers the reference-free evaluators for live traces
 ```
 
 ## Durable state
