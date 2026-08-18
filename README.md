@@ -207,6 +207,9 @@ tests/
   test_slack_render.py    Block Kit rendering for every diff shape
   test_persistence.py     Postgres integration (skipped without TEST_DATABASE_URL)
 evals/
+  snapshot_fixture.py       Capture/replay real cluster states as eval fixtures
+  capture_snapshot.py       CLI to record a live cluster state (redacts by default)
+  fixtures/                 Recorded cluster states + hand-written expectations
   create_dataset.py         Script to upload eval examples to LangSmith
   sre-agent-k8s-eval.jsonl  Pre-built JSONL dataset (upload directly via LangSmith UI)
   evaluators.py             Online evaluators
