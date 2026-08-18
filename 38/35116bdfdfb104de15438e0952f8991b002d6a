@@ -1,0 +1,22 @@
+.env.example
+  s_ff2a811e653094::t_3257f36e0bb755 10-13
+k8s/deployment.yaml
+  s_ff2a811e653094::t_3257f36e0bb755 76-80,84,86-90
+  s_ff2a811e653094::t_5e287f5f2d83ba 49,55,61,67,85
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "3835116bdfdfb104de15438e0952f8991b002d6a",
+  "prompts": {},
+  "sessions": {
+    "s_ff2a811e653094": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7993d812-ea5c-42dc-b0c3-b97e856ff1bc",
+        "model": "claude-opus-5"
+      },
+      "human_author": null
+    }
+  }
+}
