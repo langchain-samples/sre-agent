@@ -12,9 +12,10 @@ from types import SimpleNamespace
 
 import pytest
 from langchain_core.messages import ToolMessage
+from langgraph.types import Command
 
-from agent import truncate_tool_output
-from config import TOOL_OUTPUT_MAX_CHARS
+from agent import _fanout_output_used, truncate_tool_output
+from config import TASK_FANOUT_OUTPUT_MAX_CHARS, TOOL_OUTPUT_MAX_CHARS
 
 
 def call_with(content, tool_name="kubectl_get_pod_logs"):
@@ -23,6 +24,19 @@ def call_with(content, tool_name="kubectl_get_pod_logs"):
                              tool=SimpleNamespace(name=tool_name))
     handler = lambda req: ToolMessage(content=content, tool_call_id="tc-1")
     # wrap_tool_call returns an AgentMiddleware; the hook is wrap_tool_call.
+    return truncate_tool_output.wrap_tool_call(request, handler)
+
+
+def call_task_with(content, state):
+    request = SimpleNamespace(
+        tool_name="task",
+        tool=SimpleNamespace(name="task"),
+        state=state,
+    )
+    result = Command(
+        update={"messages": [ToolMessage(content=content, tool_call_id="tc-1")]}
+    )
+    handler = lambda req: result
     return truncate_tool_output.wrap_tool_call(request, handler)
 
 
@@ -75,6 +89,26 @@ def test_the_largest_output_we_actually_saw_would_be_truncated():
     out = call_with("L" * 20_451).content
     assert "[TRUNCATED:" in out
     assert len(out) < 20_451 + 400
+
+
+def test_task_command_result_is_truncated():
+    state = {"messages": [SimpleNamespace(tool_calls=[{"id": "step-1"}])]}
+    out = call_task_with("t" * (TOOL_OUTPUT_MAX_CHARS + 100), state)
+    content = out.update["messages"][0].content
+    assert "[TRUNCATED:" in content
+    assert len(content) <= TOOL_OUTPUT_MAX_CHARS
+
+
+def test_parallel_task_results_share_an_aggregate_budget():
+    state = {"messages": [SimpleNamespace(tool_calls=[{"id": "step-2"}])]}
+    outputs = [
+        call_task_with("u" * TOOL_OUTPUT_MAX_CHARS, state)
+        for _ in range(8)
+    ]
+    total = sum(len(output.update["messages"][0].content) for output in outputs)
+    assert total <= TASK_FANOUT_OUTPUT_MAX_CHARS + 200
+    assert "[TRUNCATED:" in outputs[-1].update["messages"][0].content
+    _fanout_output_used.clear()
 
 
 def test_non_string_content_is_left_alone():

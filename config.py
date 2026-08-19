@@ -56,6 +56,12 @@ FS_TOOL_RUN_LIMIT = int(os.getenv("FS_TOOL_RUN_LIMIT", "25"))
 # still fits. Only one output observed in production exceeded it (20,451 chars).
 TOOL_OUTPUT_MAX_CHARS = int(os.getenv("TOOL_OUTPUT_MAX_CHARS", "12000"))
 
+# Max combined characters returned by task subagents in one parallel step.
+TASK_FANOUT_OUTPUT_MAX_CHARS = int(
+    os.getenv("TASK_FANOUT_OUTPUT_MAX_CHARS", "48000")
+)
+TASK_FANOUT_MAX_CALLS = int(os.getenv("TASK_FANOUT_MAX_CALLS", "8"))
+
 # Anthropic prompt caching — caches the large static system prompt + tool
 # definitions + growing message history so a multi-step loop is not re-billed
 # full input tokens on every model call.

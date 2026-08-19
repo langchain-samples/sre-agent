@@ -1,5 +1,6 @@
 """Main SRE orchestrator agent."""
 import logging
+import threading
 
 from deepagents import create_deep_agent
 from deepagents.backends import FilesystemBackend
@@ -14,6 +15,8 @@ from config import (
     MODEL,
     DATABASE_URL,
     TOOL_OUTPUT_MAX_CHARS,
+    TASK_FANOUT_OUTPUT_MAX_CHARS,
+    TASK_FANOUT_MAX_CALLS,
     DEFAULT_NAMESPACES,
     PROMPT_CACHING,
     MODEL_CALL_RUN_LIMIT,
@@ -29,6 +32,98 @@ log = logging.getLogger("sre-agent.agent")
 # Read-heavy filesystem tools that caused the original runaway-loop cost
 # incident (agent grep/read_file-ing files in a cycle). Capped tightly below.
 _FS_READ_TOOLS = ("grep", "read_file", "ls", "glob")
+_fanout_output_lock = threading.Lock()
+_fanout_output_used: dict[tuple[str, object], int] = {}
+
+
+def _tool_name(request) -> str:
+    tool_call = getattr(request, "tool_call", None)
+    return (
+        getattr(request, "tool_name", None)
+        or getattr(getattr(request, "tool", None), "name", None)
+        or (tool_call.get("name") if isinstance(tool_call, dict) else None)
+        or "tool"
+    )
+
+
+def _fanout_step_key(request) -> tuple[str, object]:
+    state = getattr(request, "state", None)
+    messages = state.get("messages") if isinstance(state, dict) else None
+    if messages:
+        tool_calls = getattr(messages[-1], "tool_calls", None)
+        if tool_calls:
+            call_ids = tuple(call.get("id") for call in tool_calls)
+            return ("state", call_ids)
+    runtime = getattr(request, "runtime", None)
+    config = getattr(runtime, "config", {}) or {}
+    configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
+    return (str(configurable.get("thread_id", "default")), id(state))
+
+
+def _truncate_text(content: str, limit: int, name: str) -> str:
+    dropped = len(content) - limit
+    marker = (
+        f"\n\n[TRUNCATED: {name} returned {len(content):,} characters; "
+        f"{dropped:,} were dropped to protect the context window. "
+        "Narrow the request (fewer lines, one namespace, a single resource) "
+        "if you need the rest.]"
+    )
+    if limit <= 0:
+        return marker
+    if len(marker) >= limit:
+        return marker[:limit]
+    return content[: limit - len(marker)] + marker
+
+
+def _truncate_message(message, limit: int, name: str):
+    content = getattr(message, "content", None)
+    if not isinstance(content, str) or len(content) <= limit:
+        return message, len(content) if isinstance(content, str) else 0
+    truncated = _truncate_text(content, limit, name)
+    try:
+        return message.model_copy(update={"content": truncated}), len(truncated)
+    except AttributeError:
+        message.content = truncated
+        return message, len(truncated)
+
+
+def _truncate_result(result, limit: int, name: str):
+    content = getattr(result, "content", None)
+    if isinstance(content, str):
+        if len(content) <= limit:
+            return result, len(content)
+        truncated = _truncate_text(content, limit, name)
+        try:
+            return result.model_copy(update={"content": truncated}), len(truncated)
+        except AttributeError:
+            result.content = truncated
+            return result, len(truncated)
+
+    update = getattr(result, "update", None)
+    messages = update.get("messages") if isinstance(update, dict) else None
+    if not messages:
+        return result, 0
+    used = 0
+    updated_messages = []
+    for message in messages:
+        remaining = max(0, limit - used)
+        updated_message, message_chars = _truncate_message(message, remaining, name)
+        updated_messages.append(updated_message)
+        used += message_chars
+    if not used:
+        return result, 0
+    updated = {**update, "messages": updated_messages}
+    try:
+        from langgraph.types import Command
+
+        return Command(
+            graph=result.graph,
+            update=updated,
+            resume=result.resume,
+            goto=result.goto,
+        ), used
+    except AttributeError:
+        return result, used
 
 
 @wrap_model_call
@@ -63,30 +158,28 @@ def truncate_tool_output(request, handler):
     how much, so it can narrow its next query instead of assuming it saw
     everything. Silently dropping the tail would be worse than the overflow.
     """
+    name = _tool_name(request)
+    limit = TOOL_OUTPUT_MAX_CHARS
+    if name == "task":
+        key = _fanout_step_key(request)
+        with _fanout_output_lock:
+            used = _fanout_output_used.get(key, 0)
+            per_task_limit = TASK_FANOUT_OUTPUT_MAX_CHARS // max(1, TASK_FANOUT_MAX_CALLS)
+            limit = min(
+                limit,
+                per_task_limit,
+                max(0, TASK_FANOUT_OUTPUT_MAX_CHARS - used),
+            )
+            _fanout_output_used[key] = used + limit
     result = handler(request)
-    content = getattr(result, "content", None)
-    if not isinstance(content, str) or len(content) <= TOOL_OUTPUT_MAX_CHARS:
+    truncated_result, output_chars = _truncate_result(result, limit, name)
+    if truncated_result is result:
         return result
-
-    name = getattr(request, "tool_name", None) or getattr(
-        getattr(request, "tool", None), "name", "tool")
-    dropped = len(content) - TOOL_OUTPUT_MAX_CHARS
-    truncated = (
-        content[:TOOL_OUTPUT_MAX_CHARS]
-        + f"\n\n[TRUNCATED: {name} returned {len(content):,} characters; "
-          f"{dropped:,} were dropped to protect the context window. "
-          f"Narrow the request (fewer lines, one namespace, a single resource) "
-          f"if you need the rest.]"
-    )
     log.warning(
-        "Truncated %s output: %d chars -> %d (dropped %d)",
-        name, len(content), TOOL_OUTPUT_MAX_CHARS, dropped,
+        "Truncated %s output to %d characters",
+        name, output_chars,
     )
-    try:
-        return result.model_copy(update={"content": truncated})
-    except AttributeError:
-        result.content = truncated
-        return result
+    return truncated_result
 
 
 def _build_middleware() -> list:
