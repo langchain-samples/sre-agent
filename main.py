@@ -15,8 +15,17 @@ console = Console()
 
 def check_env():
     missing = []
-    if not os.getenv("ANTHROPIC_API_KEY"):
-        missing.append("ANTHROPIC_API_KEY")
+    provider = os.getenv("LLM_PROVIDER", "anthropic").strip().lower()
+    provider_keys = {
+        "anthropic": "ANTHROPIC_API_KEY",
+        "openai": "OPENAI_API_KEY",
+    }
+    api_key = provider_keys.get(provider)
+    if api_key is None:
+        console.print("[red]LLM_PROVIDER must be 'anthropic' or 'openai'.[/red]")
+        sys.exit(1)
+    if not os.getenv(api_key):
+        missing.append(api_key)
     if not os.getenv("LANGSMITH_API_KEY"):
         missing.append("LANGSMITH_API_KEY")
     if missing:

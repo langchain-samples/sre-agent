@@ -1,5 +1,5 @@
 """Performance Analyzer subagent — CPU, memory, and latency analysis."""
-from config import SUBAGENT_MODEL
+from llm import get_subagent_model
 from tools import (
     kubectl_top_pods,
     kubectl_top_nodes,
@@ -13,7 +13,7 @@ from tools import (
 
 performance_analyzer_subagent = {
     "name": "performance-analyzer",
-    "model": SUBAGENT_MODEL,
+    "model": get_subagent_model(),
     "description": (
         "Analyze Kubernetes workload performance: CPU throttling, memory pressure, "
         "resource limits vs actual usage, OOM risk, and right-sizing recommendations. "

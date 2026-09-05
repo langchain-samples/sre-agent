@@ -3,8 +3,27 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-MODEL = "claude-sonnet-4-6"
-SUBAGENT_MODEL = "claude-haiku-4-5-20251001"  # Used for read-only subagents to reduce cost
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "anthropic").strip().lower()
+if LLM_PROVIDER not in {"anthropic", "openai"}:
+    raise ValueError("LLM_PROVIDER must be either 'anthropic' or 'openai'")
+
+# Keep the existing Anthropic defaults, while allowing every active model role
+# to be overridden independently. The OpenAI defaults preserve the same tiered
+# design: Sol for orchestration and Luna for read-heavy workers / extraction.
+if LLM_PROVIDER == "openai":
+    MODEL_ID = os.getenv("OPENAI_MODEL", "gpt-5.6-sol")
+    SUBAGENT_MODEL_ID = os.getenv("OPENAI_SUBAGENT_MODEL", "gpt-5.6-luna")
+else:
+    MODEL_ID = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+    SUBAGENT_MODEL_ID = os.getenv(
+        "ANTHROPIC_SUBAGENT_MODEL", "claude-haiku-4-5-20251001"
+    )
+
+# Provider-qualified strings are understood by Deep Agents / LangChain. OpenAI
+# models are instantiated explicitly in llm.py so tool-using calls use the
+# Responses API; these strings remain useful for logs and configuration tests.
+MODEL = f"{LLM_PROVIDER}:{MODEL_ID}"
+SUBAGENT_MODEL = f"{LLM_PROVIDER}:{SUBAGENT_MODEL_ID}"
 PROMETHEUS_URL = os.getenv("PROMETHEUS_URL", "")
 
 # In-cluster detection: Kubernetes injects SERVICE_ACCOUNT_TOKEN at this path
@@ -58,7 +77,8 @@ TOOL_OUTPUT_MAX_CHARS = int(os.getenv("TOOL_OUTPUT_MAX_CHARS", "12000"))
 
 # Anthropic prompt caching — caches the large static system prompt + tool
 # definitions + growing message history so a multi-step loop is not re-billed
-# full input tokens on every model call.
+# full input tokens on every model call. It is ignored for OpenAI, whose recent
+# models use automatic prompt caching.
 PROMPT_CACHING = os.getenv("PROMPT_CACHING", "true").lower() in ("1", "true", "yes")
 
 # ---------------------------------------------------------------------------

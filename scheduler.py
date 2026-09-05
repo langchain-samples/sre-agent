@@ -1,9 +1,9 @@
 """Autonomous monitoring scheduler — runs health checks on a configurable interval.
 
 Cost-optimised design: data is collected via direct Python kubernetes-client calls
-(zero LLM tokens), then a *single* claude-haiku call analyses the snapshot.
+(zero LLM tokens), then a *single* low-cost model call analyses the snapshot.
 This replaces the previous approach that ran the full Deep Agents orchestrator
-(~20 Sonnet calls per check) with ~1 Haiku call — roughly a 95-99% cost reduction.
+(~20 model calls per check) with one structured-output call.
 """
 from __future__ import annotations
 import asyncio
@@ -15,7 +15,12 @@ from datetime import datetime, timezone
 from langsmith import traceable
 from langsmith.wrappers import wrap_anthropic
 
-from config import MONITOR_DIGEST_EVERY_N_CHECKS, MONITOR_NOTIFY_ON_RESOLVED
+from config import (
+    LLM_PROVIDER,
+    MONITOR_DIGEST_EVERY_N_CHECKS,
+    MONITOR_NOTIFY_ON_RESOLVED,
+    SUBAGENT_MODEL_ID,
+)
 from monitor_state import diff_report
 
 log = logging.getLogger("sre-agent.scheduler")
@@ -707,9 +712,59 @@ def _repair_health_report(payload):
         return None
 
 
-@traceable(name="scheduled-health-check", run_type="llm")
-def _analyse_with_haiku(snapshot: str) -> "HealthReport":
-    """Send the pre-collected snapshot to claude-haiku for analysis.
+def _health_prompt(snapshot: str) -> tuple[str, str]:
+    """Build the provider-neutral prompt for a bounded health analysis."""
+    system = (
+        "You are a concise SRE assistant. You receive a Kubernetes cluster snapshot "
+        "and produce a structured health report. Focus on actionable issues and name "
+        "specific resources. Skip healthy resources unless there is a pattern worth "
+        "noting. Set overall_severity to the highest severity among your findings, or "
+        "'ok' if the cluster is healthy."
+    )
+    user = (
+        "Cluster snapshot collected at "
+        f"{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}:\n\n{snapshot}"
+    )
+    return system, user
+
+
+def _degraded_health_report(summary: str):
+    from schemas import HealthReport
+
+    return HealthReport(
+        overall_severity="warning",
+        summary=summary,
+        findings=[],
+        recommended_actions=[],
+    )
+
+
+def _analyse_with_openai(snapshot: str) -> "HealthReport":
+    """Use OpenAI native structured output through LangChain's Responses API."""
+    from llm import get_subagent_model
+    from schemas import HealthReport
+
+    system, user = _health_prompt(snapshot)
+    model = get_subagent_model().with_structured_output(
+        HealthReport,
+        method="json_schema",
+    )
+    try:
+        result = model.invoke([("system", system), ("user", user)])
+        return HealthReport.model_validate(result)
+    except Exception as e:
+        log.error(
+            "OpenAI health analysis failed to return a valid HealthReport (model=%s): %s",
+            SUBAGENT_MODEL_ID,
+            e,
+        )
+        return _degraded_health_report(
+            "Health analysis did not return a structured result; review the cluster manually."
+        )
+
+
+def _analyse_with_anthropic(snapshot: str) -> "HealthReport":
+    """Use Anthropic forced tool calling to produce a HealthReport.
 
     Uses forced tool-use so the model returns a validated HealthReport rather
     than free text that has to be regex-parsed downstream.
@@ -719,13 +774,7 @@ def _analyse_with_haiku(snapshot: str) -> "HealthReport":
 
     client = wrap_anthropic(anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY", "")))
 
-    system = (
-        "You are a concise SRE assistant. You receive a Kubernetes cluster snapshot "
-        "and produce a structured health report by calling the report_health tool. "
-        "Focus on actionable issues and name specific resources. Skip healthy "
-        "resources unless there is a pattern worth noting. Set overall_severity to "
-        "the highest severity among your findings, or 'ok' if the cluster is healthy."
-    )
+    system, user = _health_prompt(snapshot)
     tool = {
         "name": "report_health",
         "description": "Report the structured cluster health assessment.",
@@ -733,7 +782,7 @@ def _analyse_with_haiku(snapshot: str) -> "HealthReport":
     }
 
     response = client.messages.create(
-        model="claude-haiku-4-5-20251001",
+        model=SUBAGENT_MODEL_ID,
         max_tokens=4096,
         system=system,
         tools=[tool],
@@ -741,7 +790,7 @@ def _analyse_with_haiku(snapshot: str) -> "HealthReport":
         messages=[
             {
                 "role": "user",
-                "content": f"Cluster snapshot collected at {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}:\n\n{snapshot}",
+                "content": user,
             }
         ],
     )
@@ -759,7 +808,7 @@ def _analyse_with_haiku(snapshot: str) -> "HealthReport":
         # this is diagnosable, and surface a clearly-labelled degraded report.
         block_types = [getattr(b, "type", "?") for b in response.content]
         log.error(
-            "Haiku returned no tool_use block (stop_reason=%s, blocks=%s)",
+            "Anthropic returned no tool_use block (stop_reason=%s, blocks=%s)",
             stop_reason, block_types,
         )
         hint = " (analysis hit the output token limit)" if stop_reason == "max_tokens" else ""
@@ -778,13 +827,13 @@ def _analyse_with_haiku(snapshot: str) -> "HealthReport":
         repaired = _repair_health_report(tool_input)
         if repaired is not None:
             log.warning(
-                "Repaired malformed HealthReport from Haiku (stop_reason=%s, severity=%s, "
+                "Repaired malformed HealthReport from Anthropic (stop_reason=%s, severity=%s, "
                 "findings=%d): %s",
                 stop_reason, repaired.overall_severity, len(repaired.findings), e,
             )
             return repaired
 
-        log.error("Failed to validate HealthReport from Haiku (stop_reason=%s): %s", stop_reason, e)
+        log.error("Failed to validate HealthReport from Anthropic (stop_reason=%s): %s", stop_reason, e)
         return HealthReport(
             overall_severity="warning",
             summary="Health analysis returned a malformed result; review the cluster manually.",
@@ -793,19 +842,27 @@ def _analyse_with_haiku(snapshot: str) -> "HealthReport":
         )
 
 
+@traceable(name="scheduled-health-check", run_type="llm")
+def _analyse_snapshot(snapshot: str) -> "HealthReport":
+    """Analyze a pre-collected snapshot with the configured LLM provider."""
+    if LLM_PROVIDER == "openai":
+        return _analyse_with_openai(snapshot)
+    return _analyse_with_anthropic(snapshot)
+
+
 def run_structured_health_check() -> tuple["HealthReport", dict]:
     """Run the bounded, deterministic health check and return (report, raw_data).
 
     This is the canonical health-check implementation shared by the scheduler
     and the interactive Slack path: zero-token data collection via the
-    kubernetes client, then a *single* forced-tool Haiku call. It performs a
+    kubernetes client, then a *single* structured-output model call. It performs a
     fixed number of steps and therefore can never hit the agent's recursion
     limit — unlike routing a "health check" request through the full Deep
     Agents orchestrator.
     """
     data = _collect_cluster_data()
     snapshot = _format_snapshot(data)
-    report = _analyse_with_haiku(snapshot)
+    report = _analyse_snapshot(snapshot)
     return report, data
 
 
@@ -883,7 +940,7 @@ class MonitoringScheduler:
         return session_id
 
     def _do_check(self, session_id: str):
-        """Synchronous: collect data + one Haiku call, then diff. Runs in thread pool."""
+        """Synchronous: collect data + one model call, then diff. Runs in thread pool."""
         try:
             report, data = run_structured_health_check()
             now = datetime.now(timezone.utc)

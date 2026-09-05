@@ -1,5 +1,5 @@
 """Log Analyzer subagent — detects errors and anomalies in pod logs."""
-from config import SUBAGENT_MODEL
+from llm import get_subagent_model
 from tools import (
     kubectl_get_pods,
     kubectl_get_pod_logs,
@@ -10,7 +10,7 @@ from tools import (
 
 log_analyzer_subagent = {
     "name": "log-analyzer",
-    "model": SUBAGENT_MODEL,
+    "model": get_subagent_model(),
     "description": (
         "Analyze pod logs across namespaces to detect errors, exceptions, panics, "
         "OOM kills, connection failures, and other anomalies. Identifies error "

@@ -1,5 +1,5 @@
 """Change Executor subagent — applies approved changes with HITL for every write operation."""
-from config import MODEL
+from llm import get_main_model
 from tools import (
     # Read tools for verification
     kubectl_get_pods,
@@ -43,7 +43,7 @@ CHANGE_EXECUTOR_INTERRUPT_ON = {
 
 change_executor_subagent = {
     "name": "change-executor",
-    "model": MODEL,
+    "model": get_main_model(),
     "description": (
         "Execute approved Kubernetes changes: scaling deployments, updating resource "
         "limits, patching HPAs, restarting workloads, and applying manifests. "
