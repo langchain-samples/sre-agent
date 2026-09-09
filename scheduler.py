@@ -627,11 +627,47 @@ def _format_snapshot(data: dict) -> str:
         lines.append(
             f"\n=== WARNING EVENTS (last {EVENT_MAX_AGE_MINUTES}m) ==="
         )
-        for e in data["events"][:10]:
-            when = f"{e['age_min']}m ago" if e.get("age_min") is not None else "age unknown"
+        grouped = {}
+        for e in data["events"]:
+            key = (e["object"], e["reason"], e["namespace"])
+            age_min = e.get("age_min")
+            if key not in grouped:
+                grouped[key] = {
+                    "event": e,
+                    "count": e.get("count") or 1,
+                    "newest_age": age_min,
+                    "oldest_age": age_min,
+                }
+                continue
+
+            group = grouped[key]
+            group["count"] += e.get("count") or 1
+            if len(e.get("message") or "") > len(group["event"].get("message") or ""):
+                group["event"] = e
+            if age_min is not None:
+                if group["newest_age"] is None or age_min < group["newest_age"]:
+                    group["newest_age"] = age_min
+                if group["oldest_age"] is None or age_min > group["oldest_age"]:
+                    group["oldest_age"] = age_min
+
+        groups = list(grouped.values())
+        for group in groups[:10]:
+            e = group["event"]
+            newest_age = group["newest_age"]
+            oldest_age = group["oldest_age"]
+            if newest_age is None:
+                when = "age unknown"
+            elif newest_age == oldest_age:
+                when = f"{newest_age}m ago"
+            else:
+                when = f"{oldest_age}-{newest_age}m ago"
+            if group["count"] > 1:
+                when = f"x{group['count']}, {when}"
             lines.append(
-                f"  [{e['namespace']}] {e['object']} — {e['reason']} ({when}): {e['message'][:110]}"
+                f"  [{e['namespace']}] {e['object']} — {e['reason']} ({when}): {e['message']}"
             )
+        if len(groups) > 10:
+            lines.append(f"  ... and {len(groups) - 10} more distinct warning event(s)")
 
     # Collection errors
     if data["errors"]:

@@ -219,6 +219,39 @@ def test_event_with_unknown_age_says_so():
     assert "age unknown" in _format_snapshot(base_data(events=events))
 
 
+def test_warning_events_group_repeated_objects_and_preserve_messages():
+    ingress_message = "AWS ELBv2 error code Target.ResponseCodeMismatch"
+    events = [
+        {"namespace": "langsmith", "object": "Ingress/langsmith-ingress",
+         "reason": "FailedDeployModel", "message": ingress_message,
+         "count": 1, "age_min": age}
+        for age in range(11, 19)
+    ]
+    events.extend([
+        {"namespace": "prod", "object": "HPA/api", "reason": "FailedGetMetrics",
+         "message": "unable to fetch metrics: metrics API unavailable",
+         "count": 1, "age_min": 20},
+        {"namespace": "prod", "object": "Pod/api", "reason": "Unhealthy",
+         "message": "Readiness probe connection refused",
+         "count": 1, "age_min": 21},
+        {"namespace": "prod", "object": "Deployment/api", "reason": "Failed",
+         "message": "deployment rollout exceeded progress deadline",
+         "count": 1, "age_min": 22},
+    ])
+
+    out = _format_snapshot(base_data(events=events))
+
+    assert out.count("Ingress/langsmith-ingress") == 1
+    assert "FailedDeployModel (x8, 18-11m ago): " + ingress_message in out
+    assert "HPA/api" in out
+    assert "Pod/api" in out
+    assert "Deployment/api" in out
+    assert ingress_message in out
+    assert "metrics API unavailable" in out
+    assert "Readiness probe connection refused" in out
+    assert "rollout exceeded progress deadline" in out
+
+
 def test_minutes_since_handles_a_missing_timestamp():
     assert _minutes_since(None, NOW) == float("inf")
     assert _minutes_since(NOW - timedelta(minutes=30), NOW) == pytest.approx(30, abs=0.01)
