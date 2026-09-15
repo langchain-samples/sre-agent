@@ -89,6 +89,8 @@ def fingerprint(finding) -> str:
 
     if not kind and not name and not reason:
         return f"{ns}/~/{_slug(getattr(finding, 'title', ''))}"
+    if not kind and not name and reason:
+        return f"{ns}/~/{_slug(reason)}"
 
     return f"{ns}/{kind.lower()}/{name.lower()}:{_slug(reason)}"
 

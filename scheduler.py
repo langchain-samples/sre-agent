@@ -649,6 +649,60 @@ _SEVERITY_SYNONYMS = {
     "error": "critical", "urgent": "critical",
 }
 
+_FINDING_REASONS = (
+    "CrashLoopBackOff", "OOMKilled", "ImagePullBackOff", "NotReady",
+    "HPAAtMaxReplicas", "HPAAtMinReplicas", "MissingResourceLimits",
+    "NoPodDisruptionBudget", "LatestImageTag", "LowResourceUtilization", "Other",
+)
+
+
+def _canonical_reason(value):
+    """Map a model-supplied reason onto the stable finding vocabulary."""
+    normalized = "".join(char for char in str(value or "").casefold() if char.isalnum())
+    if not normalized:
+        return ""
+    for reason in _FINDING_REASONS:
+        if normalized == "".join(char for char in reason.casefold() if char.isalnum()):
+            return reason
+    return "Other"
+
+
+def _split_multi_object_findings(findings):
+    """Expand comma-joined resource names into individual findings."""
+    expanded = []
+    for finding in findings or []:
+        if not isinstance(finding, dict):
+            expanded.append(finding)
+            continue
+        resource_name = str(finding.get("resource_name") or "")
+        resource_names = (
+            [name.strip() for name in resource_name.split(",")]
+            if "," in resource_name else [resource_name]
+        )
+        for name in resource_names:
+            item = dict(finding)
+            item["resource_name"] = name
+            expanded.append(item)
+    return expanded
+
+
+def _normalize_health_payload(payload):
+    """Normalize finding identity fields before report validation."""
+    if not isinstance(payload, dict):
+        return payload
+    data = dict(payload)
+    findings = []
+    for raw in _split_multi_object_findings(data.get("findings")):
+        if isinstance(raw, dict):
+            raw = dict(raw)
+            if raw.get("reason"):
+                raw["reason"] = _canonical_reason(raw["reason"])
+            else:
+                raw.pop("reason", None)
+        findings.append(raw)
+    data["findings"] = findings
+    return data
+
 
 def _coerce_severity(value, allowed: tuple, default: str) -> str:
     """Map a model-supplied severity onto the allowed vocabulary."""
@@ -672,7 +726,7 @@ def _repair_health_report(payload):
     if not isinstance(payload, dict):
         return None
 
-    data = dict(payload)
+    data = _normalize_health_payload(payload)
     findings = []
     for raw in data.get("findings") or []:
         if not isinstance(raw, dict):
@@ -771,7 +825,7 @@ def _analyse_with_haiku(snapshot: str) -> "HealthReport":
         )
 
     try:
-        return HealthReport.model_validate(tool_input)
+        return HealthReport.model_validate(_normalize_health_payload(tool_input))
     except Exception as e:
         # Try to salvage before giving up, so a drifted enum does not cost the
         # operator the entire report.

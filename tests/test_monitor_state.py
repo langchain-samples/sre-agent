@@ -119,6 +119,14 @@ def test_fingerprint_falls_back_to_title_without_identity_fields():
     assert fingerprint(bare) == fp  # deterministic
 
 
+def test_fingerprint_uses_reason_for_cluster_wide_findings():
+    a = Finding(severity="warning", title="HPA capacity concern", detail="d",
+                namespace="prod", reason="HPAAtMaxReplicas")
+    b = Finding(severity="warning", title="Autoscaling is saturated", detail="d",
+                namespace="prod", reason="HPAAtMaxReplicas")
+    assert fingerprint(a) == fingerprint(b) == "prod/~/hpaatmaxreplicas"
+
+
 def test_fingerprint_ignores_severity():
     """Severity change must be an escalation of one finding, not a new one."""
     assert fingerprint(finding(severity="warning")) == fingerprint(finding(severity="critical"))
@@ -261,9 +269,9 @@ def test_duplicate_findings_in_one_run_collapse_to_the_worst():
 def test_active_findings_are_ordered_by_severity():
     diff = diff_report(
         report(
-            finding(severity="info", resource_name="a-4tzvn", reason="R1"),
-            finding(severity="critical", resource_name="b-4tzvn", reason="R2"),
-            finding(severity="warning", resource_name="c-4tzvn", reason="R3"),
+            finding(severity="info", resource_name="a-4tzvn", reason="Other"),
+            finding(severity="critical", resource_name="b-4tzvn", reason="Other"),
+            finding(severity="warning", resource_name="c-4tzvn", reason="Other"),
         ),
         {}, NOW,
     )

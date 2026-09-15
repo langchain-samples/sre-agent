@@ -17,6 +17,11 @@ Severity = Literal["critical", "warning", "info"]
 # to be representable here. Omitting "info" made an all-info report unanswerable
 # and the whole HealthReport failed validation.
 OverallSeverity = Literal["critical", "warning", "info", "ok"]
+FindingReason = Literal[
+    "CrashLoopBackOff", "OOMKilled", "ImagePullBackOff", "NotReady",
+    "HPAAtMaxReplicas", "HPAAtMinReplicas", "MissingResourceLimits",
+    "NoPodDisruptionBudget", "LatestImageTag", "LowResourceUtilization", "Other",
+]
 
 
 class Finding(BaseModel):
@@ -50,7 +55,7 @@ class Finding(BaseModel):
         "Use the exact name as it appears in the snapshot. If a finding covers several "
         "objects, emit one finding per object instead of listing them here.",
     )
-    reason: str = Field(
+    reason: FindingReason = Field(
         default="",
         description="Short stable machine-style cause in CamelCase, e.g. CrashLoopBackOff, "
         "OOMKilled, ImagePullBackOff, NotReady, HPAAtMaxReplicas, MissingResourceLimits, "

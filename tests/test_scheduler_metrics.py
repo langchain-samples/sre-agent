@@ -268,8 +268,15 @@ def test_top_pods_section_absent_without_metrics():
 # HealthReport validation and repair
 # ---------------------------------------------------------------------------
 
-from schemas import HealthReport
-from scheduler import _coerce_severity, _repair_health_report
+from datetime import datetime, timezone
+
+from monitor_state import StoredFinding, diff_report, fingerprint
+from schemas import Finding, HealthReport
+from scheduler import (
+    _canonical_reason,
+    _coerce_severity,
+    _repair_health_report,
+)
 
 
 def test_all_info_report_is_now_representable():
@@ -284,7 +291,7 @@ def test_all_info_report_is_now_representable():
         findings=[{"severity": "info", "title": "Over-provisioned",
                    "detail": "requests far exceed usage", "namespace": "prod",
                    "kind": "Deployment", "resource_name": "api",
-                   "reason": "OverProvisioned"}],
+                   "reason": "Other"}],
     )
     assert r.overall_severity == "info"
     assert not r.has_issues          # info is not an actionable issue
@@ -359,3 +366,49 @@ def test_repair_returns_none_for_unusable_payloads():
 def test_repair_supplies_a_summary_when_absent():
     report = _repair_health_report({"overall_severity": "ok", "findings": []})
     assert report.summary == "Health check completed."
+
+
+def test_canonical_reason_normalizes_case_and_separators():
+    assert _canonical_reason("HPAAtMaxReplicas") == "HPAAtMaxReplicas"
+    assert _canonical_reason("hpaatmaxreplicas") == "HPAAtMaxReplicas"
+    assert _canonical_reason("HPA At Max Replicas") == "HPAAtMaxReplicas"
+    assert _canonical_reason("HPA At Min Replicas") == "HPAAtMinReplicas"
+
+
+def test_repair_splits_multi_object_findings():
+    raw = {
+        "severity": "warning", "title": "HPAs at max", "detail": "d",
+        "namespace": "prod", "kind": "HPA",
+        "resource_name": "api, worker, billing, search, web",
+        "reason": "hpa at max replicas",
+    }
+    report = _repair_health_report({"overall_severity": "warning", "findings": [raw]})
+    assert len(report.findings) == 5
+    assert [f.resource_name for f in report.findings] == ["api", "worker", "billing", "search", "web"]
+    assert {fingerprint(f) for f in report.findings} == {
+        fingerprint(Finding(**{**raw, "resource_name": name, "reason": "HPAAtMaxReplicas"}))
+        for name in ["api", "worker", "billing", "search", "web"]
+    }
+
+
+def test_normalized_aggregate_has_no_false_new_or_resolved_findings():
+    names = ["api", "worker", "billing", "search", "web"]
+    payload = {
+        "overall_severity": "warning", "summary": "s", "findings": [{
+            "severity": "warning", "title": "HPAs at max", "detail": "d",
+            "namespace": "prod", "kind": "HPA",
+            "resource_name": ", ".join(names), "reason": "HPA At Max Replicas",
+        }],
+    }
+    normalized = _repair_health_report(payload)
+    stored = {
+        fingerprint(f): StoredFinding(
+            fingerprint=fingerprint(f), severity=f.severity, title=f.title,
+            namespace=f.namespace, first_seen=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            last_seen=datetime(2026, 1, 1, tzinfo=timezone.utc), times_seen=1,
+        )
+        for f in normalized.findings
+    }
+    diff = diff_report(normalized, stored)
+    assert not diff.new
+    assert not diff.resolved

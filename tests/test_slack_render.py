@@ -151,9 +151,9 @@ def test_fully_acked_report_is_not_headlined_critical(notifier):
 
 def test_severity_groups_are_ordered_and_complete(notifier):
     findings = [
-        finding(severity="critical", resource_name="a-4tzvn", reason="R1", title="crit thing"),
-        finding(severity="warning", resource_name="b-4tzvn", reason="R2", title="warn thing"),
-        finding(severity="info", resource_name="c-4tzvn", reason="R3", title="info thing"),
+        finding(severity="critical", resource_name="a-4tzvn", reason="Other", title="crit thing"),
+        finding(severity="warning", resource_name="b-4tzvn", reason="Other", title="warn thing"),
+        finding(severity="info", resource_name="c-4tzvn", reason="Other", title="info thing"),
     ]
     diff = diff_report(report(*findings), {}, NOW)
     notifier.send_structured_report(report(*findings), source="scheduled", diff=diff)
@@ -164,7 +164,7 @@ def test_severity_groups_are_ordered_and_complete(notifier):
 
 
 def test_long_detail_is_truncated_within_slack_block_limits(notifier):
-    f = finding(title="huge", reason="R9", resource_name="z-4tzvn", detail="x" * 9000)
+    f = finding(title="huge", reason="Other", resource_name="z-4tzvn", detail="x" * 9000)
     diff = diff_report(report(f), {}, NOW)
     notifier.send_structured_report(report(f), source="scheduled", diff=diff)
     assert "(truncated)" in body(notifier)
