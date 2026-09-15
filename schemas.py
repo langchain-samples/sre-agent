@@ -1,7 +1,7 @@
 """Structured output schemas shared across the SRE agent.
 
 These replace the previous approach of emitting `[CRITICAL]`-prefixed free text
-and regex-parsing it downstream. Producers (the scheduler's Haiku analysis,
+and regex-parsing it downstream. Producers (the scheduler's model analysis,
 evals) emit a validated `HealthReport`; consumers (Slack rendering) read typed
 fields instead of parsing markdown.
 """

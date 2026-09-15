@@ -1,5 +1,5 @@
 """Pod Inspector subagent — analyzes pod health, restarts, and failures."""
-from config import SUBAGENT_MODEL
+from llm import get_subagent_model
 from tools import (
     kubectl_get_pods,
     kubectl_describe_pod,
@@ -10,7 +10,7 @@ from tools import (
 
 pod_inspector_subagent = {
     "name": "pod-inspector",
-    "model": SUBAGENT_MODEL,
+    "model": get_subagent_model(),
     "description": (
         "Inspect pod health across namespaces. Identifies CrashLoopBackOff, "
         "OOMKilled, Pending, Evicted, and ImagePullBackOff issues. Fetches logs "

@@ -1,5 +1,5 @@
 """Scaling Analyzer subagent — evaluates HPA config, replica counts, and sizing."""
-from config import SUBAGENT_MODEL
+from llm import get_subagent_model
 from tools import (
     kubectl_get_deployments,
     kubectl_describe_deployment,
@@ -12,7 +12,7 @@ from tools import (
 
 scaling_analyzer_subagent = {
     "name": "scaling-analyzer",
-    "model": SUBAGENT_MODEL,
+    "model": get_subagent_model(),
     "description": (
         "Analyze horizontal pod autoscaling, replica counts, and workload sizing. "
         "Identifies under-scaled, over-scaled, or misconfigured HPAs. Checks node "
