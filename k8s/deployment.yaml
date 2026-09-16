@@ -73,21 +73,28 @@ spec:
               value: "sre-agent"
             - name: LANGCHAIN_PROJECT
               value: "sre-agent"
+            # The trace credential is a personal access token, which is scoped to
+            # the organization rather than a single workspace. Without this the SDK
+            # sends no workspace header and the server resolves the token's default
+            # workspace, so runs land in whichever workspace that happens to be and
+            # a second, empty "sre-agent" project appears there. This pins ingest to
+            # the workspace that actually owns project sre-agent.
+            - name: LANGSMITH_WORKSPACE_ID
+              value: "a3866f07-2cf5-4e9c-a287-59ed817c2ecd"
             # Single destination. LANGSMITH_RUNS_ENDPOINTS was a multi-endpoint
             # fan-out carrying a key per destination; it covers trace export only,
             # so the dataset client (evals/run_eval.py, auto-recording findings)
             # could not authenticate with it. LANGSMITH_API_KEY covers both.
+            # The LANGSMITH_RUNS_ENDPOINTS key was deleted from the cluster secret on
+            # 2026-09-01. Do not reinstate a secretKeyRef to it without recreating the
+            # key first: a missing key without optional:true is a
+            # CreateContainerConfigError, not an unset variable.
             - name: LANGSMITH_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: sre-agent-secrets
                   key: LANGSMITH_API_KEY
                   optional: true
-            # - name: LANGSMITH_RUNS_ENDPOINTS
-            #   valueFrom:
-            #     secretKeyRef:
-            #       name: sre-agent-secrets
-            #       key: LANGSMITH_RUNS_ENDPOINTS
             - name: SLACK_CHANNEL
               value: "#sre_alerts"
             - name: MONITOR_INTERVAL_MINUTES
