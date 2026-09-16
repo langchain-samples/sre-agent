@@ -73,14 +73,21 @@ spec:
               value: "sre-agent"
             - name: LANGCHAIN_PROJECT
               value: "sre-agent"
-            # The trace credential is a personal access token, which is scoped to
-            # the organization rather than a single workspace. Without this the SDK
-            # sends no workspace header and the server resolves the token's default
-            # workspace, so runs land in whichever workspace that happens to be and
-            # a second, empty "sre-agent" project appears there. This pins ingest to
-            # the workspace that actually owns project sre-agent.
+            # Optional, and account-specific, so it comes from the secret rather
+            # than a literal value here (this repo is public — see the image
+            # placeholder above for the same reasoning). The trace credential is a
+            # personal access token, scoped to the organization rather than a
+            # single workspace: without this, the SDK sends no workspace header
+            # and the server resolves the token's default workspace, so runs can
+            # land in the wrong workspace and a duplicate, empty project appears
+            # there. Set LANGSMITH_WORKSPACE_ID in k8s/secret.yaml to pin it;
+            # leaving it unset falls back to the token's default workspace.
             - name: LANGSMITH_WORKSPACE_ID
-              value: "a3866f07-2cf5-4e9c-a287-59ed817c2ecd"
+              valueFrom:
+                secretKeyRef:
+                  name: sre-agent-secrets
+                  key: LANGSMITH_WORKSPACE_ID
+                  optional: true
             # Single destination. LANGSMITH_RUNS_ENDPOINTS was a multi-endpoint
             # fan-out carrying a key per destination; it covers trace export only,
             # so the dataset client (evals/run_eval.py, auto-recording findings)
