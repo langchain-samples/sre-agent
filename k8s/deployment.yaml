@@ -73,21 +73,35 @@ spec:
               value: "sre-agent"
             - name: LANGCHAIN_PROJECT
               value: "sre-agent"
+            # Optional, and account-specific, so it comes from the secret rather
+            # than a literal value here (this repo is public — see the image
+            # placeholder above for the same reasoning). The trace credential is a
+            # personal access token, scoped to the organization rather than a
+            # single workspace: without this, the SDK sends no workspace header
+            # and the server resolves the token's default workspace, so runs can
+            # land in the wrong workspace and a duplicate, empty project appears
+            # there. Set LANGSMITH_WORKSPACE_ID in k8s/secret.yaml to pin it;
+            # leaving it unset falls back to the token's default workspace.
+            - name: LANGSMITH_WORKSPACE_ID
+              valueFrom:
+                secretKeyRef:
+                  name: sre-agent-secrets
+                  key: LANGSMITH_WORKSPACE_ID
+                  optional: true
             # Single destination. LANGSMITH_RUNS_ENDPOINTS was a multi-endpoint
             # fan-out carrying a key per destination; it covers trace export only,
             # so the dataset client (evals/run_eval.py, auto-recording findings)
             # could not authenticate with it. LANGSMITH_API_KEY covers both.
+            # The LANGSMITH_RUNS_ENDPOINTS key was deleted from the cluster secret on
+            # 2026-09-01. Do not reinstate a secretKeyRef to it without recreating the
+            # key first: a missing key without optional:true is a
+            # CreateContainerConfigError, not an unset variable.
             - name: LANGSMITH_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: sre-agent-secrets
                   key: LANGSMITH_API_KEY
                   optional: true
-            # - name: LANGSMITH_RUNS_ENDPOINTS
-            #   valueFrom:
-            #     secretKeyRef:
-            #       name: sre-agent-secrets
-            #       key: LANGSMITH_RUNS_ENDPOINTS
             - name: SLACK_CHANNEL
               value: "#sre_alerts"
             - name: MONITOR_INTERVAL_MINUTES
