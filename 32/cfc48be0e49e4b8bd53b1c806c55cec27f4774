@@ -1,0 +1,19 @@
+README.md
+  s_32d9981c0ac06c::t_9215d25cf790c1 13,17,56,75-78,80-83,184-185,224-232
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "32cfc48be0e49e4b8bd53b1c806c55cec27f4774",
+  "prompts": {},
+  "sessions": {
+    "s_32d9981c0ac06c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8352052b-2301-4c21-884b-9cc6c5964e8e",
+        "model": "unknown"
+      },
+      "human_author": "Eric Johanson <eric.johanson@langchain.dev>"
+    }
+  }
+}
