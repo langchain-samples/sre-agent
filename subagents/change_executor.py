@@ -17,6 +17,7 @@ from tools import (
     kubectl_patch_hpa,
     kubectl_delete_pod,
     kubectl_apply_manifest,
+    kubectl_apply_custom_resource,
     kubectl_cordon_node,
     kubectl_uncordon_node,
     kubectl_rollout_restart,
@@ -34,6 +35,7 @@ CHANGE_EXECUTOR_INTERRUPT_ON = {
     "kubectl_patch_hpa": True,
     "kubectl_delete_pod": True,
     "kubectl_apply_manifest": True,
+    "kubectl_apply_custom_resource": True,
     "kubectl_cordon_node": True,
     "kubectl_uncordon_node": True,
     "kubectl_rollout_restart": True,
@@ -71,6 +73,11 @@ change_executor_subagent = {
         "kubectl_delete_resources_bulk), which stops reconciliation and cascade-deletes "
         "children via ownerReferences. Use kubectl_get_custom_resources / kubectl_get_crds "
         "(from the main agent) to find the CR's group, version, and plural.\n\n"
+        "To CHANGE (not delete) an operator-managed custom resource — for example to "
+        "increase a KEDA ScaledObject's spec.maxReplicaCount — read the current CR, merge "
+        "the changed field into its manifest, and call kubectl_apply_custom_resource "
+        "(an upsert that patches the CR on conflict). NEVER patch the KEDA-generated HPA "
+        "directly with kubectl_patch_hpa: KEDA reconciles and reverts it immediately.\n\n"
         "## Single changes\n"
         "For individual changes:\n"
         "1. BEFORE: read current state (describe the resource to be modified)\n"
@@ -102,6 +109,7 @@ change_executor_subagent = {
         kubectl_patch_hpa,
         kubectl_delete_pod,
         kubectl_apply_manifest,
+        kubectl_apply_custom_resource,
         kubectl_cordon_node,
         kubectl_uncordon_node,
         kubectl_rollout_restart,
