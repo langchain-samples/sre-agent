@@ -1,0 +1,53 @@
+tests/test_persistence.py
+  s_32d9981c0ac06c::t_ccd9f601f2812d 242-283
+  s_32d9981c0ac06c::t_117ebec7d9bcf2 123-140
+  s_32d9981c0ac06c::t_5969c5f45aac2b 48-49
+  s_32d9981c0ac06c::t_cd7440057970ec 241
+  s_32d9981c0ac06c::t_6e4e0e441cfc8a 297-298
+  s_32d9981c0ac06c::t_6b32a0341611e3 284-285
+persistence.py
+  s_32d9981c0ac06c::t_d92f97073f6727 322-323,479-520
+  s_32d9981c0ac06c::t_ef4fb58f1be6b9 191-194
+  s_32d9981c0ac06c::t_ba7a4e0ce5c7c2 167-176
+  s_32d9981c0ac06c::t_9edb762f0e1345 96-111
+  s_32d9981c0ac06c::t_9465e80a96a21a 303-321
+  s_32d9981c0ac06c::t_e75f547a7b7cac 177,324,521
+tools/resolution_memory.py
+  s_32d9981c0ac06c::t_4af9117c45d8d3 1-54
+api.py
+  s_32d9981c0ac06c::t_467ecaf92f8f84 804-808,811
+agent.py
+  s_32d9981c0ac06c::t_8ca10ea0833bb1 171-178
+resolution_memory.py
+  s_32d9981c0ac06c::t_ad42a60f986777 1-104
+monitor_state.py
+  s_32d9981c0ac06c::t_e2eeb0f9584b33 96-116
+tests/test_monitor_state.py
+  s_32d9981c0ac06c::t_20d01cfc7b77cc 128-135
+  s_32d9981c0ac06c::t_3fe738488a8874 20
+  s_32d9981c0ac06c::t_8a884469de4e0f 136-137
+tests/test_resolution_memory.py
+  s_32d9981c0ac06c::t_95f3b41336b4f0 1-133
+scheduler.py
+  s_32d9981c0ac06c::t_84daaec70588e0 886
+  s_32d9981c0ac06c::t_9b5e81c3cfb87d 22-23
+  s_32d9981c0ac06c::t_835dcbd4a3d038 950
+  s_32d9981c0ac06c::t_abdfa595c7e353 939-949,951-964
+  s_32d9981c0ac06c::t_022956d4557a13 965
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c055229799e84fae8c661d4f52f085a3bb20eb24",
+  "prompts": {},
+  "sessions": {
+    "s_32d9981c0ac06c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8352052b-2301-4c21-884b-9cc6c5964e8e",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "Eric Johanson <eric.johanson@langchain.dev>"
+    }
+  }
+}
