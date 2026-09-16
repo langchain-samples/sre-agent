@@ -45,7 +45,8 @@ def clean(db):
     """Each test starts from an empty schema."""
     with db._pool.connection() as conn:
         conn.execute(
-            "TRUNCATE sessions, hitl_audit, finding_state, monitor_reports, monitor_meta"
+            "TRUNCATE sessions, hitl_audit, finding_state, monitor_reports, "
+            "monitor_meta, resolution_memory"
         )
     yield
 
@@ -117,6 +118,24 @@ def test_audit_rows_are_recorded_newest_first(db):
 def test_recent_decisions_limit_is_clamped(db):
     db.record_decision(session_id="s1", decision="approve")
     assert len(db.recent_decisions(10**6)) == 1
+
+
+def test_decisions_since_excludes_rejections_and_earlier_rows(db):
+    db.record_decision(session_id="s1", decision="approve", actor="eric",
+                       tool_name="kubectl_scale_deployment",
+                       tool_args={"deployment_name": "api", "namespace": "prod", "replicas": 5})
+    db.record_decision(session_id="s1", decision="reject", actor="eric",
+                       tool_name="kubectl_delete_pod", tool_args={"pod_name": "x", "namespace": "prod"})
+    db.record_decision(session_id="s1", decision="edit", actor="eric",
+                       tool_name="kubectl_rollout_restart",
+                       tool_args={"resource_type": "deployment", "resource_name": "api", "namespace": "prod"})
+
+    rows = db.decisions_since(NOW - timedelta(days=1))
+    assert {r["tool_name"] for r in rows} == {"kubectl_scale_deployment", "kubectl_rollout_restart"}
+    assert rows == sorted(rows, key=lambda r: r["ts"], reverse=True)
+
+    future = db.decisions_since(datetime.now(timezone.utc) + timedelta(hours=1))
+    assert future == []
 
 
 # ---------------------------------------------------------------------------
@@ -220,6 +239,51 @@ def test_check_counter_increments_atomically(db):
 
 
 # ---------------------------------------------------------------------------
+# Resolution memory
+# ---------------------------------------------------------------------------
+
+def test_record_resolution_then_find_known_fixes(db):
+    fp = "prod/deployment/api:crashloopbackoff"
+    db.record_resolution(fp, "kubectl_scale_deployment", {"deployment_name": "api", "replicas": 5}, actor="eric")
+
+    fixes = db.find_known_fixes(fp)
+    assert len(fixes) == 1
+    assert fixes[0]["tool_name"] == "kubectl_scale_deployment"
+    assert fixes[0]["tool_args"]["replicas"] == 5
+    assert fixes[0]["times_confirmed"] == 1
+    assert fixes[0]["last_actor"] == "eric"
+
+
+def test_record_resolution_repeat_increments_confirmation_count(db):
+    fp = "prod/deployment/api:crashloopbackoff"
+    db.record_resolution(fp, "kubectl_scale_deployment", {"replicas": 5}, actor="eric")
+    db.record_resolution(fp, "kubectl_scale_deployment", {"replicas": 8}, actor="dana")
+
+    fixes = db.find_known_fixes(fp)
+    assert len(fixes) == 1
+    assert fixes[0]["times_confirmed"] == 2
+    assert fixes[0]["tool_args"]["replicas"] == 8  # most recent args win
+    assert fixes[0]["last_actor"] == "dana"
+
+
+def test_distinct_tools_for_the_same_fingerprint_are_kept_separately(db):
+    fp = "prod/deployment/api:crashloopbackoff"
+    db.record_resolution(fp, "kubectl_scale_deployment", {"replicas": 5})
+    db.record_resolution(fp, "kubectl_rollout_restart", {"resource_type": "deployment"})
+    db.record_resolution(fp, "kubectl_scale_deployment", {"replicas": 6})  # confirm again
+
+    fixes = db.find_known_fixes(fp)
+    assert len(fixes) == 2
+    assert fixes[0]["tool_name"] == "kubectl_scale_deployment"  # times_confirmed=2, ranks first
+    assert fixes[0]["times_confirmed"] == 2
+    assert fixes[1]["tool_name"] == "kubectl_rollout_restart"
+
+
+def test_find_known_fixes_returns_empty_for_an_unknown_fingerprint(db):
+    assert db.find_known_fixes("prod/deployment/nope:whatever") == []
+
+
+# ---------------------------------------------------------------------------
 # Degradation
 # ---------------------------------------------------------------------------
 
@@ -230,6 +294,8 @@ def test_null_database_matches_the_postgres_interface(db):
     assert not null.available
     assert null.load_tracked_findings() == {}
     assert null.recent_decisions() == []
+    assert null.decisions_since(NOW) == []
+    assert null.find_known_fixes("prod/deployment/api:crashloopbackoff") == []
 
 
 @pytest.mark.parametrize("dsn", ["", "postgresql://nobody:nope@127.0.0.1:1/none"])

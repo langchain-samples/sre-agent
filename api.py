@@ -801,10 +801,14 @@ async def lifespan(app: FastAPI):
     from tools.slack import make_slack_notification_tool
     slack_tool = make_slack_notification_tool(_notifier)
 
-    # 4. Agent (with Slack tool injected)
+    # 3b. Resolution-memory tool
+    from tools.resolution_memory import make_resolution_memory_tool
+    resolution_tool = make_resolution_memory_tool(_db)
+
+    # 4. Agent (with Slack + resolution-memory tools injected)
     from agent import create_sre_agent
     _agent = create_sre_agent(
-        extra_tools=[slack_tool], checkpointer=checkpointer, store=store
+        extra_tools=[slack_tool, resolution_tool], checkpointer=checkpointer, store=store
     )
 
     # 5. Slack Bolt Socket Mode in background thread

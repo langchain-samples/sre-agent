@@ -19,7 +19,8 @@ from config import (
     MONITOR_NOTIFY_ON_RESOLVED,
     SUBAGENT_MODEL_ID,
 )
-from monitor_state import diff_report
+from monitor_state import diff_report, parse_fingerprint
+from resolution_memory import find_best_match
 from llm import HealthReportTokenLimitError, request_health_report
 
 log = logging.getLogger("sre-agent.scheduler")
@@ -882,6 +883,7 @@ class MonitoringScheduler:
             check_no = self._db.next_check_number()
             diff = diff_report(report, self._db.load_tracked_findings(), now)
             self._db.apply_diff(diff, now)
+            self._correlate_resolutions(diff.resolved)
 
             log.info(
                 "Health check complete (session=%s, check=%d, severity=%s, %s, unhealthy_pods=%d)",
@@ -933,4 +935,31 @@ class MonitoringScheduler:
                     "critical",
                     "SRE Bot — Scheduled Check Failed",
                     f"The autonomous health check encountered an error:\n```{e}```",
+                )
+
+    def _correlate_resolutions(self, resolved) -> None:
+        """Best-effort: remember which approved fix likely resolved each finding.
+
+        Never allowed to break the core notify path — this is a nice-to-have
+        memory feature, not core monitoring, so any failure here is logged and
+        swallowed.
+        """
+        for rf in resolved:
+            try:
+                parsed = parse_fingerprint(rf.fingerprint)
+                if not parsed or not rf.first_seen:
+                    continue
+                ns, kind, name = parsed
+                decisions = self._db.decisions_since(rf.first_seen)
+                match = find_best_match(ns, kind, name, decisions)
+                if match:
+                    self._db.record_resolution(
+                        rf.fingerprint,
+                        match.get("tool_name", ""),
+                        match.get("tool_args") or {},
+                        match.get("actor", ""),
+                    )
+            except Exception:
+                log.warning(
+                    "Resolution-memory correlation failed for %s", rf.fingerprint, exc_info=True
                 )

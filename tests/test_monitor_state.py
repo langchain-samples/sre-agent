@@ -17,6 +17,7 @@ from monitor_state import (
     fingerprint,
     humanize_age,
     normalize_resource_name,
+    parse_fingerprint,
 )
 from schemas import Finding, HealthReport
 
@@ -122,6 +123,16 @@ def test_fingerprint_falls_back_to_title_without_identity_fields():
 def test_fingerprint_ignores_severity():
     """Severity change must be an escalation of one finding, not a new one."""
     assert fingerprint(finding(severity="warning")) == fingerprint(finding(severity="critical"))
+
+
+def test_parse_fingerprint_recovers_namespace_kind_and_normalized_name():
+    f = finding(namespace="prod", kind="Pod", resource_name="api-6b474476c4-6nqxr", reason="CrashLoopBackOff")
+    assert parse_fingerprint(fingerprint(f)) == ("prod", "pod", "api")
+
+
+def test_parse_fingerprint_returns_none_for_the_no_identity_fallback():
+    bare = Finding(severity="info", title="Cluster has no NetworkPolicies", detail="d")
+    assert parse_fingerprint(fingerprint(bare)) is None
 
 
 # ---------------------------------------------------------------------------

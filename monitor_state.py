@@ -93,6 +93,27 @@ def fingerprint(finding) -> str:
     return f"{ns}/{kind.lower()}/{name.lower()}:{_slug(reason)}"
 
 
+def parse_fingerprint(fp: str) -> Optional[tuple[str, str, str]]:
+    """Recover ``(namespace, kind, resource_name)`` from a fingerprint string.
+
+    The inverse of :func:`fingerprint`. Returns ``None`` for the no-identity
+    fallback form (``"{ns}/~/{slug}"``), since there is nothing to correlate
+    against — this happens for findings that carry no kind/name/reason at all.
+    Safe to split on ``/`` and ``:`` because Kubernetes resource names cannot
+    contain either character.
+    """
+    try:
+        ns, kind, rest = fp.split("/", 2)
+    except ValueError:
+        return None
+    if kind == "~":
+        return None
+    name, _, _reason_slug = rest.partition(":")
+    if not name:
+        return None
+    return ns, kind, name
+
+
 # ---------------------------------------------------------------------------
 # Diff model
 # ---------------------------------------------------------------------------
