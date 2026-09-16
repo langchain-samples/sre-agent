@@ -10,9 +10,11 @@ An autonomous Kubernetes SRE agent. It monitors cluster health, diagnoses issues
 - **Fast interactive health checks** — a "run a health check" mention is served by the same bounded path as the scheduler (direct cluster reads + a single structured-output call), so it returns in seconds and can never hit the agent's recursion limit — unlike routing it through the full orchestrator
 - **Custom resource support** — the change-executor can create, update, and delete CRD instances, so it can remove an operator's top-level custom resource (e.g. an `lgps.apps.langchain.ai`) instead of fighting the operator's reconciliation loop
 - **Model gateway support** — route Claude calls through a LangChain/LangSmith model gateway by setting `ANTHROPIC_BASE_URL`; unset, it calls Anthropic directly
+- **Anthropic or OpenAI** — `LLM_PROVIDER` picks the model backend (`anthropic`, the default, or `openai`); model IDs for both the main agent and read-only subagents are independently overridable (see `llm.py`, `config.py`)
 - **Scheduled monitoring** — periodic cluster health checks on a configurable interval. The scheduler collects cluster state directly via the Kubernetes client (no LLM tokens), then makes a single structured-output call to summarize findings
 - **Structured findings** — health analysis returns a typed `HealthReport` (see `schemas.py`) rather than free text, so Slack rendering reads typed fields instead of parsing markdown
 - **Two interfaces** — CLI for interactive use, FastAPI + web UI for in-cluster deployment
+- **Rendered chat UI** — the web UI renders assistant replies as Markdown (including tables) instead of plain text, and shows a live progress indicator while a request is running
 - **LangSmith tracing** — full observability of every agent run, with an eval dataset and online evaluators
 
 ## Example Output
@@ -51,7 +53,7 @@ The main agent only has read tools. All writes are delegated to `change-executor
 
 - Python 3.12+
 - `kubectl` configured and pointing at your cluster (for local dev)
-- Anthropic API key
+- Anthropic API key, or an OpenAI API key with `LLM_PROVIDER=openai`
 - LangSmith API key (for tracing)
 - Slack app with Bot and App-level tokens (optional, for Slack notifications)
 
@@ -70,8 +72,15 @@ python api.py         # API + web UI at http://localhost:8080
 
 | Variable | Required | Description |
 | -------- | -------- | ----------- |
-| `ANTHROPIC_API_KEY` | Yes | Claude API key. When routing through a gateway (see `ANTHROPIC_BASE_URL`), set this to your gateway key |
+| `LLM_PROVIDER` | No | `anthropic` (default) or `openai`. Selects the model backend for the main agent, subagents, and the health-check scheduler |
+| `ANTHROPIC_API_KEY` | Yes, when `LLM_PROVIDER=anthropic` (the default) | Claude API key. When routing through a gateway (see `ANTHROPIC_BASE_URL`), set this to your gateway key |
+| `ANTHROPIC_MODEL` | No | Main agent model (default: `claude-sonnet-4-6`) |
+| `ANTHROPIC_SUBAGENT_MODEL` | No | Model for read-only subagents and the health-check scheduler (default: `claude-haiku-4-5-20251001`) |
 | `ANTHROPIC_BASE_URL` | No | Route Claude calls through a model gateway, e.g. `https://gateway.smith.langchain.com/anthropic`; unset = call Anthropic directly |
+| `OPENAI_API_KEY` | Yes, when `LLM_PROVIDER=openai` | OpenAI API key |
+| `OPENAI_MODEL` | No | Main agent model when `LLM_PROVIDER=openai` (default: `gpt-5.6-sol`) |
+| `OPENAI_SUBAGENT_MODEL` | No | Subagent/scheduler model when `LLM_PROVIDER=openai` (default: `gpt-5.6-luna`) |
+| `OPENAI_BASE_URL` | No | Optional OpenAI-compatible gateway endpoint; unset = call OpenAI directly |
 | `LANGSMITH_API_KEY` | Yes | LangSmith tracing key |
 | `LANGSMITH_TRACING` | Yes | Set to `true` to enable tracing |
 | `LANGSMITH_PROJECT` | No | Project name (default: `sre-agent`) |
@@ -172,6 +181,8 @@ agent.py              Main SRE orchestrator
 api.py                FastAPI server (SSE streaming, HITL endpoints, web UI)
 main.py               CLI entry point
 config.py             Env-based configuration
+llm.py                Provider-aware model construction (Anthropic or OpenAI, per LLM_PROVIDER)
+response_text.py      Normalizes Anthropic/OpenAI response content into plain text for the UI and Slack
 schemas.py            Pydantic models (Finding, HealthReport) — structured-output contract
 scheduler.py          Periodic health check scheduler (structured HealthReport via tool-use),
                       diffed against stored state so only changes are posted
@@ -210,9 +221,15 @@ k8s/                  Kustomize manifests for cluster deployment
   secret.yaml.example   Template for the secret; copy to secret.yaml and fill in
                       (postgres.yaml = StatefulSet + Service + NetworkPolicy)
 tests/
-  test_monitor_state.py   Fingerprint stability and diff semantics
-  test_slack_render.py    Block Kit rendering for every diff shape
-  test_persistence.py     Postgres integration (skipped without TEST_DATABASE_URL)
+  test_monitor_state.py       Fingerprint stability and diff semantics
+  test_slack_render.py        Block Kit rendering for every diff shape
+  test_persistence.py         Postgres integration (skipped without TEST_DATABASE_URL)
+  test_llm_provider.py        Model construction for both providers via LLM_PROVIDER
+  test_response_text.py       Content-normalization for Anthropic vs. OpenAI response shapes
+  test_health_report_provider.py  Structured health report path for both providers
+  test_web_markdown.py        Markdown/table rendering in the web UI
+  test_api_startup.py         API boots with either provider configured
+  test_cli_response.py        CLI response rendering
 evals/
   create_dataset.py         Script to upload eval examples to LangSmith
   sre-agent-k8s-eval.jsonl  Pre-built JSONL dataset (upload directly via LangSmith UI)
