@@ -1,0 +1,21 @@
+k8s/deployment.yaml
+  s_32d9981c0ac06c::t_954ea0701ccd3a 76-84,86-90
+k8s/secret.yaml.example
+  s_32d9981c0ac06c::t_ca900152395357 47-53
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "35ec5ce5f9f219f3c3716a0788e71ce0d225f4b3",
+  "prompts": {},
+  "sessions": {
+    "s_32d9981c0ac06c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8352052b-2301-4c21-884b-9cc6c5964e8e",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "Eric Johanson <eric.johanson@langchain.dev>"
+    }
+  }
+}
