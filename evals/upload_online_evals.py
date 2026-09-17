@@ -1,128 +1,93 @@
-"""Upload the three SRE-agent online evaluators to LangSmith."""
+"""Upload online evaluators to LangSmith, to score production traces.
+
+Online evaluators run against live traces, which have **no ground-truth example**.
+That makes reference-based metrics structurally unable to work here: comparing the
+agent's answer to a reference is meaningless when there is no reference.
+
+The previous version of this file shipped hand-copied reference-based evaluators.
+They read `expected_response` out of the *run's* outputs, a field only a dataset
+example carries, so on every production trace they compared "" against "" and
+recorded severity_accuracy=0 and tool_coverage=1.0 regardless of what the agent
+did. Constant scores are worse than no scores, because they look like data.
+
+Two changes here. Only reference-free evaluators are uploaded, and their source is
+read from evaluators.py with inspect.getsource instead of being maintained as a
+second copy that drifts. That is also why those functions keep their imports and
+helpers inline: LangSmith executes them in a sandbox with no access to this repo.
+
+    LANGSMITH_API_KEY=... LANGSMITH_PROJECT_ID=... python evals/upload_online_evals.py
+    python evals/upload_online_evals.py --print   # show what would be uploaded
+"""
+from __future__ import annotations
+
+import argparse
+import inspect
 import os
 import re
-import requests
+import sys
+from pathlib import Path
 
-API_KEY = os.environ["LANGSMITH_API_KEY"]
-PROJECT_ID = os.environ["LANGSMITH_PROJECT_ID"]
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from evals.evaluators import REFERENCE_FREE  # noqa: E402
+
 BASE_URL = "https://api.smith.langchain.com"
-HEADERS = {"x-api-key": API_KEY, "Content-Type": "application/json"}
 
 
-def upload(name: str, code: str) -> None:
-    func_name = re.search(r"def (\w+)\(", code).group(1)
-    code = re.sub(
-        rf"\bdef\s+{re.escape(func_name)}\s*\(",
-        "def perform_eval(",
-        code,
-        count=1,
-    )
+def to_sandbox_source(fn) -> str:
+    """Render an evaluator as standalone source for the LangSmith sandbox."""
+    src = inspect.getsource(fn)
+    # The sandbox calls perform_eval(run, example).
+    src = re.sub(rf"\bdef\s+{re.escape(fn.__name__)}\s*\(", "def perform_eval(", src, count=1)
+    # Reference-free evaluators take example=None; the sandbox always passes two args.
+    return src.replace("def perform_eval(run, example=None):", "def perform_eval(run, example):")
+
+
+def upload(name: str, code: str) -> bool:
+    import requests
+
     payload = {
         "display_name": name,
         "sampling_rate": 1.0,
-        "session_id": PROJECT_ID,
+        "session_id": os.environ["LANGSMITH_PROJECT_ID"],
         "code_evaluators": [{"code": code, "language": "python"}],
     }
-    r = requests.post(f"{BASE_URL}/runs/rules", json=payload, headers=HEADERS)
-    status = "OK" if r.status_code == 200 else r.text[:300]
-    print(f"[{r.status_code}] {name}: {status}")
-
-
-# ── 1. Severity Accuracy ──────────────────────────────────────────────────────
-
-SEVERITY_ACCURACY = """
-import re
-
-def severity_accuracy(run, example):
-    pattern = re.compile(r'\\[(CRITICAL|WARNING|INFO|OK)\\]', re.IGNORECASE)
-    def extract(text):
-        m = pattern.search(text)
-        return m.group(1).upper() if m else None
-    actual   = extract((run.get('outputs')     or {}).get('expected_response', ''))
-    expected = extract((example.get('outputs') or {}).get('expected_response', ''))
-    if actual is None or expected is None:
-        return {'key': 'severity_accuracy', 'score': 0,
-                'comment': f'Missing severity bracket — actual={actual}, expected={expected}'}
-    return {'key': 'severity_accuracy',
-            'score': 1 if actual == expected else 0,
-            'comment': f'actual={actual}, expected={expected}'}
-"""
-
-# ── 2. Tool Coverage ──────────────────────────────────────────────────────────
-
-TOOL_COVERAGE = """
-def tool_coverage(run, example):
-    actual_traj   = (run.get('outputs')     or {}).get('expected_trajectory', [])
-    expected_traj = (example.get('outputs') or {}).get('expected_trajectory', [])
-    if not expected_traj:
-        return {'key': 'tool_coverage', 'score': 1.0,
-                'comment': 'No expected trajectory to check against'}
-    actual_set   = set(actual_traj)
-    expected_set = set(expected_traj)
-    covered = actual_set & expected_set
-    score   = len(covered) / len(expected_set)
-    missing = sorted(expected_set - actual_set)
-    extra   = sorted(actual_set   - expected_set)
-    parts   = [f'covered {len(covered)}/{len(expected_set)} tools']
-    if missing:
-        parts.append(f'missing={missing}')
-    if extra:
-        parts.append(f'extra={extra}')
-    return {'key': 'tool_coverage', 'score': round(score, 3), 'comment': ', '.join(parts)}
-"""
-
-# ── 3. Response Quality (LLM-as-judge via Anthropic Haiku) ───────────────────
-
-RESPONSE_QUALITY = """
-import os
-import json
-import re
-import anthropic
-
-def response_quality(run, example):
-    agent_text    = (run.get('outputs')     or {}).get('expected_response', '')
-    expected_text = (example.get('outputs') or {}).get('expected_response', '')
-
-    prompt = (
-        'You are evaluating an SRE agent Kubernetes response.\\n\\n'
-        'Expected (ground truth):\\n' + expected_text + '\\n\\n'
-        'Agent response:\\n' + agent_text + '\\n\\n'
-        'Score 1-5:\\n'
-        '5=correct diagnosis + specific resources + clear remediation\\n'
-        '4=correct + mostly specific + vague remediation\\n'
-        '3=partially correct, some specifics missing\\n'
-        '2=off diagnosis or too generic\\n'
-        '1=wrong or irrelevant\\n\\n'
-        'Reply with JSON only: {"score": <int>, "specific": <bool>, '
-        '"actionable": <bool>, "correct_diagnosis": <bool>, "reasoning": "<str>"}'
+    r = requests.post(
+        f"{BASE_URL}/runs/rules",
+        json=payload,
+        headers={"x-api-key": os.environ["LANGSMITH_API_KEY"],
+                 "Content-Type": "application/json"},
     )
+    ok = r.status_code == 200
+    print(f"[{r.status_code}] {name}: {'OK' if ok else r.text[:300]}")
+    return ok
 
-    client = anthropic.Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY', ''))
-    msg = client.messages.create(
-        model='claude-haiku-4-5-20251001',
-        max_tokens=300,
-        messages=[{'role': 'user', 'content': prompt}],
-    )
-    text = msg.content[0].text
-    m = re.search(r'\\{.*\\}', text, re.DOTALL)
-    if not m:
-        return {'key': 'response_quality', 'score': 0,
-                'comment': f'Parse error: {text[:100]}'}
-    grade = json.loads(m.group())
-    normalized = round((grade['score'] - 1) / 4, 3)
-    return {
-        'key': 'response_quality',
-        'score': normalized,
-        'comment': (
-            f"score={grade['score']}/5 | specific={grade['specific']}, "
-            f"actionable={grade['actionable']}, "
-            f"correct_diagnosis={grade['correct_diagnosis']} | "
-            f"{grade['reasoning']}"
-        ),
-    }
-"""
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--print", action="store_true", dest="show",
+                    help="print the generated source instead of uploading")
+    args = ap.parse_args()
+
+    print(f"reference-free evaluators: {[f.__name__ for f in REFERENCE_FREE]}")
+    print("(reference-based evaluators are offline-only; see this file's docstring)\n")
+
+    for fn in REFERENCE_FREE:
+        code = to_sandbox_source(fn)
+        title = fn.__name__.replace("_", " ").title()
+        if args.show:
+            print(f"{'=' * 70}\n{title}\n{'=' * 70}\n{code}")
+            continue
+        for var in ("LANGSMITH_API_KEY", "LANGSMITH_PROJECT_ID"):
+            if not os.getenv(var):
+                print(f"ERROR: {var} is not set.")
+                if var == "LANGSMITH_API_KEY":
+                    print("  Note: LANGSMITH_RUNS_ENDPOINTS carries keys for trace export")
+                    print("  only. This endpoint needs LANGSMITH_API_KEY directly.")
+                return 1
+        upload(title, code)
+    return 0
+
 
 if __name__ == "__main__":
-    upload("Severity Accuracy", SEVERITY_ACCURACY)
-    upload("Tool Coverage", TOOL_COVERAGE)
-    upload("Response Quality", RESPONSE_QUALITY)
+    sys.exit(main())
