@@ -93,6 +93,22 @@ CREATE TABLE IF NOT EXISTS monitor_meta (
     key   text PRIMARY KEY,
     value text
 );
+
+-- Correlates a tracked finding (by fingerprint) with a write-tool call that
+-- was approved while it was open and that it did not outlive. A fingerprint
+-- can have more than one distinct known fix over its history (e.g. sometimes
+-- a scale fixed it, sometimes a restart did), so the PK includes tool_name.
+CREATE TABLE IF NOT EXISTS resolution_memory (
+    fingerprint        text NOT NULL,
+    tool_name          text NOT NULL,
+    tool_args          jsonb NOT NULL,
+    first_confirmed_at timestamptz NOT NULL DEFAULT now(),
+    last_confirmed_at  timestamptz NOT NULL DEFAULT now(),
+    times_confirmed    integer NOT NULL DEFAULT 1,
+    last_actor         text NOT NULL DEFAULT '',
+    PRIMARY KEY (fingerprint, tool_name)
+);
+CREATE INDEX IF NOT EXISTS resolution_memory_fingerprint_idx ON resolution_memory (fingerprint);
 """
 
 # How far back a resolved finding is still remembered. Keeps flap detection
@@ -148,6 +164,17 @@ class NullDatabase:
     def next_check_number(self) -> int:
         return 0
 
+    def decisions_since(self, since: datetime, limit: int = 500) -> list[dict]:
+        return []
+
+    def record_resolution(
+        self, fingerprint: str, tool_name: str, tool_args: Any, actor: str = ""
+    ) -> None:
+        pass
+
+    def find_known_fixes(self, fingerprint: str) -> list[dict]:
+        return []
+
 
 class PostgresDatabase:
     """Postgres-backed state. All SQL is parameterized; no value interpolation."""
@@ -161,7 +188,10 @@ class PostgresDatabase:
     def setup(self) -> None:
         with self._pool.connection() as conn:
             conn.execute(SCHEMA)
-        log.info("Postgres schema ready (sessions, hitl_audit, finding_state, monitor_*)")
+        log.info(
+            "Postgres schema ready (sessions, hitl_audit, finding_state, "
+            "monitor_*, resolution_memory)"
+        )
 
     def close(self) -> None:
         try:
@@ -267,6 +297,28 @@ class PostgresDatabase:
                  LIMIT %s
                 """,
                 (min(max(limit, 1), 500),),
+            )
+            return list(cur.fetchall())
+
+    def decisions_since(self, since: datetime, limit: int = 500) -> list[dict]:
+        """Approved/edited write-tool calls at or after ``since``, newest first.
+
+        Scoped by time rather than count (unlike ``recent_decisions``) because a
+        finding can stay open for days, and a global 500-row cap could miss the
+        approval that fixed it in a busy cluster.
+        """
+        with self._pool.connection() as conn:
+            cur = conn.execute(
+                """
+                SELECT ts, tool_name, tool_args, actor
+                  FROM hitl_audit
+                 WHERE ts >= %s
+                   AND decision IN ('approve', 'edit')
+                   AND tool_name != ''
+                 ORDER BY ts DESC
+                 LIMIT %s
+                """,
+                (since, min(max(limit, 1), 500)),
             )
             return list(cur.fetchall())
 
@@ -423,6 +475,49 @@ class PostgresDatabase:
             return int(row["value"])
         except (TypeError, ValueError, KeyError):
             return 0
+
+    # -- resolution memory --------------------------------------------------
+
+    def record_resolution(
+        self, fingerprint: str, tool_name: str, tool_args: Any, actor: str = ""
+    ) -> None:
+        """Remember that ``tool_name``/``tool_args`` resolved ``fingerprint``.
+
+        Upserts on (fingerprint, tool_name): a repeat pairing increments
+        ``times_confirmed`` instead of creating a duplicate row, so confidence
+        in a known fix grows the more times it is independently observed to work.
+        """
+        from psycopg.types.json import Jsonb
+
+        with self._pool.connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO resolution_memory (
+                    fingerprint, tool_name, tool_args, last_actor
+                ) VALUES (%s, %s, %s, %s)
+                ON CONFLICT (fingerprint, tool_name) DO UPDATE SET
+                    tool_args         = EXCLUDED.tool_args,
+                    last_confirmed_at = now(),
+                    times_confirmed   = resolution_memory.times_confirmed + 1,
+                    last_actor        = EXCLUDED.last_actor
+                """,
+                (fingerprint, tool_name, Jsonb(tool_args or {}), actor or ""),
+            )
+
+    def find_known_fixes(self, fingerprint: str) -> list[dict]:
+        """Known fixes for a fingerprint, most-confirmed and most-recent first."""
+        with self._pool.connection() as conn:
+            cur = conn.execute(
+                """
+                SELECT tool_name, tool_args, times_confirmed,
+                       first_confirmed_at, last_confirmed_at, last_actor
+                  FROM resolution_memory
+                 WHERE fingerprint = %s
+                 ORDER BY times_confirmed DESC, last_confirmed_at DESC
+                """,
+                (fingerprint,),
+            )
+            return list(cur.fetchall())
 
 
 def init_persistence(database_url: str = "") -> tuple[Any, Any, Any]:

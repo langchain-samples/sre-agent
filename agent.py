@@ -168,9 +168,14 @@ Unless told otherwise, check these namespaces: {', '.join(DEFAULT_NAMESPACES) or
 
 ### For applying changes:
 1. Only proceed after presenting findings and getting user confirmation
-2. Delegate ALL changes to task(agent="change-executor") — never apply changes directly
-3. The change-executor will pause for your approval before each write operation
-4. After a change completes, call send_slack_notification with the result
+2. Before proposing a fix, call check_resolution_memory(namespace, kind, resource_name, reason)
+   to see whether this exact finding pattern has a previously-approved fix on record. If it
+   does, mention it explicitly — including how many times it has been confirmed — both when
+   delegating to change-executor and when reporting to the user. This is a suggestion based on
+   past approvals, never a reason to skip approval: HITL is still required every time.
+3. Delegate ALL changes to task(agent="change-executor") — never apply changes directly
+4. The change-executor will pause for your approval before each write operation
+5. After a change completes, call send_slack_notification with the result
 
 ### Slack notification guidelines:
 - severity='critical' → CrashLoopBackOff, OOMKilled, deployment not ready, node NotReady,
