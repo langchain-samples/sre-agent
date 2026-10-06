@@ -1,0 +1,270 @@
+{
+  "captured_at": "2026-08-11T22:00:00+00:00",
+  "collected": {
+    "deployments": [
+      {
+        "available": 2,
+        "desired": 2,
+        "name": "langsmith-backend",
+        "namespace": "langsmith",
+        "ready": 2
+      },
+      {
+        "available": 3,
+        "desired": 3,
+        "name": "langsmith-ingest-queue",
+        "namespace": "langsmith",
+        "ready": 3
+      }
+    ],
+    "errors": [],
+    "events": [
+      {
+        "age_min": 51,
+        "count": 1,
+        "message": "",
+        "namespace": "sre-agent",
+        "object": "Pod/sre-agent-7f47d67cf4-h7xn8",
+        "reason": "InspectFailed"
+      }
+    ],
+    "hpas": [],
+    "node_metrics": [
+      {
+        "cpu": "210000000n",
+        "memory": "12076Mi",
+        "name": "node-1"
+      },
+      {
+        "cpu": "882000000n",
+        "memory": "8828Mi",
+        "name": "node-2"
+      }
+    ],
+    "nodes": [
+      {
+        "cpu_allocatable": "15890m",
+        "memory_allocatable": "61346264Ki",
+        "name": "node-1",
+        "status": "Ready",
+        "version": "v1.30.14-eks-ecaa3a6"
+      },
+      {
+        "cpu_allocatable": "15890m",
+        "memory_allocatable": "62034384Ki",
+        "name": "node-2",
+        "status": "Ready",
+        "version": "v1.30.14-eks-ecaa3a6"
+      }
+    ],
+    "pod_metrics": {},
+    "pvc_usage": {}
+  },
+  "expected": {
+    "max_overall_severity": "warning",
+    "snapshot_must_contain": [
+      "HIGH RESTART COUNTS",
+      "all 10 pods healthy"
+    ],
+    "snapshot_must_not_contain": [
+      "UNHEALTHY PODS",
+      "sre-agent-7f47d67cf4"
+    ],
+    "unhealthy_pod_names": []
+  },
+  "fixture_version": 1,
+  "note": "Rolling restart mistaken for a fleet-wide outage. All 10 pods Running and Ready, 18-43 lifetime restarts, every last termination Completed exit 0. The old classifier used `restarts >= 5` and reported all 10 as unhealthy, driving severity=critical for hours. Also carries a stale InvalidImageName event for a pod that no longer exists.",
+  "raw_pods": [
+    {
+      "containers": [
+        {
+          "last_terminated": {
+            "exit_code": 0,
+            "min_ago": 150,
+            "reason": "Completed"
+          },
+          "ready": true,
+          "restart_count": 43,
+          "terminated": null,
+          "waiting_reason": null
+        }
+      ],
+      "created_min_ago": 20160,
+      "name": "langsmith-backend-c8645c959-nqflx",
+      "namespace": "langsmith",
+      "phase": "Running"
+    },
+    {
+      "containers": [
+        {
+          "last_terminated": {
+            "exit_code": 0,
+            "min_ago": 150,
+            "reason": "Completed"
+          },
+          "ready": true,
+          "restart_count": 43,
+          "terminated": null,
+          "waiting_reason": null
+        }
+      ],
+      "created_min_ago": 20160,
+      "name": "langsmith-backend-c8645c959-t9zqm",
+      "namespace": "langsmith",
+      "phase": "Running"
+    },
+    {
+      "containers": [
+        {
+          "last_terminated": {
+            "exit_code": 0,
+            "min_ago": 160,
+            "reason": "Completed"
+          },
+          "ready": true,
+          "restart_count": 38,
+          "terminated": null,
+          "waiting_reason": null
+        }
+      ],
+      "created_min_ago": 20160,
+      "name": "langsmith-ingest-queue-6d987cc768-n45rz",
+      "namespace": "langsmith",
+      "phase": "Running"
+    },
+    {
+      "containers": [
+        {
+          "last_terminated": {
+            "exit_code": 0,
+            "min_ago": 161,
+            "reason": "Completed"
+          },
+          "ready": true,
+          "restart_count": 38,
+          "terminated": null,
+          "waiting_reason": null
+        }
+      ],
+      "created_min_ago": 20160,
+      "name": "langsmith-ingest-queue-6d987cc768-n96js",
+      "namespace": "langsmith",
+      "phase": "Running"
+    },
+    {
+      "containers": [
+        {
+          "last_terminated": {
+            "exit_code": 0,
+            "min_ago": 161,
+            "reason": "Completed"
+          },
+          "ready": true,
+          "restart_count": 38,
+          "terminated": null,
+          "waiting_reason": null
+        }
+      ],
+      "created_min_ago": 20160,
+      "name": "langsmith-ingest-queue-6d987cc768-t4phz",
+      "namespace": "langsmith",
+      "phase": "Running"
+    },
+    {
+      "containers": [
+        {
+          "last_terminated": {
+            "exit_code": 0,
+            "min_ago": 157,
+            "reason": "Completed"
+          },
+          "ready": true,
+          "restart_count": 29,
+          "terminated": null,
+          "waiting_reason": null
+        }
+      ],
+      "created_min_ago": 20160,
+      "name": "langsmith-platform-backend-59db48957c-kbkcq",
+      "namespace": "langsmith",
+      "phase": "Running"
+    },
+    {
+      "containers": [
+        {
+          "last_terminated": {
+            "exit_code": 0,
+            "min_ago": 156,
+            "reason": "Completed"
+          },
+          "ready": true,
+          "restart_count": 29,
+          "terminated": null,
+          "waiting_reason": null
+        }
+      ],
+      "created_min_ago": 20160,
+      "name": "langsmith-platform-backend-59db48957c-n2957",
+      "namespace": "langsmith",
+      "phase": "Running"
+    },
+    {
+      "containers": [
+        {
+          "last_terminated": {
+            "exit_code": 0,
+            "min_ago": 156,
+            "reason": "Completed"
+          },
+          "ready": true,
+          "restart_count": 29,
+          "terminated": null,
+          "waiting_reason": null
+        }
+      ],
+      "created_min_ago": 20160,
+      "name": "langsmith-platform-backend-59db48957c-tg9bp",
+      "namespace": "langsmith",
+      "phase": "Running"
+    },
+    {
+      "containers": [
+        {
+          "last_terminated": {
+            "exit_code": 0,
+            "min_ago": 153,
+            "reason": "Completed"
+          },
+          "ready": true,
+          "restart_count": 19,
+          "terminated": null,
+          "waiting_reason": null
+        }
+      ],
+      "created_min_ago": 20160,
+      "name": "langsmith-queue-877b64869-mp4sg",
+      "namespace": "langsmith",
+      "phase": "Running"
+    },
+    {
+      "containers": [
+        {
+          "last_terminated": {
+            "exit_code": 0,
+            "min_ago": 153,
+            "reason": "Completed"
+          },
+          "ready": true,
+          "restart_count": 18,
+          "terminated": null,
+          "waiting_reason": null
+        }
+      ],
+      "created_min_ago": 20160,
+      "name": "langsmith-listener-7f444f98cc-ft7wp",
+      "namespace": "langsmith",
+      "phase": "Running"
+    }
+  ],
+  "redacted": false
+}
