@@ -721,7 +721,10 @@ def _health_prompt(snapshot: str) -> tuple[str, str]:
     system = (
         "You are a concise SRE assistant. You receive a Kubernetes cluster snapshot "
         "and produce a structured health report. Focus on actionable issues and name "
-        "specific resources. Skip healthy resources unless there is a pattern worth "
+        "specific resources. Report at most 10 findings, most severe first. Group "
+        "resources of the same kind in the same namespace that share a reason into "
+        "one finding, identifying all affected resources in detail. Always include "
+        "recommended_actions. Skip healthy resources unless there is a pattern worth "
         "noting. Set overall_severity to the highest severity among your findings, or "
         "'ok' if the cluster is healthy."
     )
@@ -735,12 +738,14 @@ def _health_prompt(snapshot: str) -> tuple[str, str]:
 def _degraded_health_report(summary: str):
     from schemas import HealthReport
 
-    return HealthReport(
+    report = HealthReport(
         overall_severity="warning",
         summary=summary,
         findings=[],
         recommended_actions=[],
     )
+    report._analysis_complete = False
+    return report
 
 
 @traceable(name="scheduled-health-check", run_type="llm")
@@ -799,15 +804,11 @@ def run_structured_health_check() -> tuple["HealthReport", dict]:
 
 
 def annotate_with_history(report, db):
-    """Diff a report against stored state WITHOUT advancing that state.
-
-    Used by the interactive Slack path so an on-demand check can still say
-    "ongoing 6h, seen 12 times" — while leaving ``times_seen`` to mean
-    "consecutive *scheduled* checks". If ad-hoc requests advanced the counters,
-    a chatty channel would inflate them and the digest cadence would drift.
-    """
+    """Diff a complete report against stored state WITHOUT advancing that state."""
     from monitor_state import diff_report
 
+    if not report.analysis_complete:
+        return None
     return diff_report(report, db.load_tracked_findings())
 
 
@@ -875,6 +876,13 @@ class MonitoringScheduler:
         """Synchronous: collect data + one model call, then diff. Runs in thread pool."""
         try:
             report, data = run_structured_health_check()
+            if not report.analysis_complete:
+                log.warning(
+                    "Health analysis incomplete (session=%s); preserving finding state", session_id,
+                )
+                if self._notifier.enabled:
+                    self._notifier.send_structured_report(report, source="scheduled")
+                return
             now = datetime.now(timezone.utc)
 
             # Advance state first so a Slack failure below cannot cause the next

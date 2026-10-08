@@ -76,6 +76,7 @@ python api.py         # API + web UI at http://localhost:8080
 | `ANTHROPIC_API_KEY` | Yes, when `LLM_PROVIDER=anthropic` (the default) | Claude API key. When routing through a gateway (see `ANTHROPIC_BASE_URL`), set this to your gateway key |
 | `ANTHROPIC_MODEL` | No | Main agent model (default: `claude-sonnet-4-6`) |
 | `ANTHROPIC_SUBAGENT_MODEL` | No | Model for read-only subagents and the health-check scheduler (default: `claude-haiku-4-5-20251001`) |
+| `ANTHROPIC_HEALTH_REPORT_MAX_TOKENS` | No | Positive integer output-token budget for Anthropic health reports (default: `8192`; invalid values fall back to the default) |
 | `ANTHROPIC_BASE_URL` | No | Route Claude calls through a model gateway, e.g. `https://gateway.smith.langchain.com/anthropic`; unset = call Anthropic directly |
 | `OPENAI_API_KEY` | Yes, when `LLM_PROVIDER=openai` | OpenAI API key |
 | `OPENAI_MODEL` | No | Main agent model when `LLM_PROVIDER=openai` (default: `gpt-5.6-sol`) |
@@ -279,6 +280,11 @@ Slack is only notified when something is **new**, **escalated**, or **newly
 resolved**. Otherwise the run is logged and stays quiet. A digest posts every
 `MONITOR_DIGEST_EVERY_N_CHECKS` runs regardless, so a silent channel still
 proves the bot is alive.
+
+Health analysis groups same-kind resources in the same namespace with a shared
+cause into at most 10 findings and includes recommended actions. If a provider
+hits its output token limit, partial output is discarded and Slack marks the
+analysis incomplete; the check does not advance incident state or resolve findings.
 
 Findings are identified by `namespace/kind/name:reason`, not by the model's
 free-text title (which it rewords between runs) and not by raw pod name (which

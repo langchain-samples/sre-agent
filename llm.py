@@ -45,17 +45,34 @@ def get_subagent_model():
     return _build_model(SUBAGENT_MODEL_ID)
 
 
-def request_health_report(schema: dict, system: str, user: str):
-    """Return an unvalidated report payload for shared validation and repair.
+def _health_report_max_tokens() -> int:
+    """Return a positive Anthropic output budget, falling back on invalid configuration."""
+    try:
+        max_tokens = int(os.getenv("ANTHROPIC_HEALTH_REPORT_MAX_TOKENS", "8192"))
+        if max_tokens > 0:
+            return max_tokens
+    except ValueError:
+        pass
+    log.warning("Invalid ANTHROPIC_HEALTH_REPORT_MAX_TOKENS; using 8192")
+    return 8192
 
-    Pass a JSON schema rather than a Pydantic class to OpenAI so enum drift
-    reaches our repair step instead of raising inside the SDK's model parser.
-    """
+
+def request_health_report(schema: dict, system: str, user: str):
+    """Return an unvalidated report payload for shared validation and repair."""
     if LLM_PROVIDER == "openai":
         model = get_subagent_model().with_structured_output(
-            schema, method="json_schema",
+            schema, method="json_schema", include_raw=True,
         )
-        return model.invoke([("system", system), ("user", user)])
+        result = model.invoke([("system", system), ("user", user)])
+        metadata = result["raw"].response_metadata
+        if (
+            metadata.get("finish_reason") == "length"
+            or (metadata.get("incomplete_details") or {}).get("reason") == "max_output_tokens"
+        ):
+            raise HealthReportTokenLimitError("Health analysis hit the output token limit")
+        if result.get("parsing_error") is not None:
+            raise result["parsing_error"]
+        return result["parsed"]
 
     import anthropic
     from langsmith.wrappers import wrap_anthropic
@@ -63,7 +80,7 @@ def request_health_report(schema: dict, system: str, user: str):
     client = wrap_anthropic(anthropic.Anthropic(api_key=os.getenv(PROVIDER_API_KEY, "")))
     response = client.messages.create(
         model=SUBAGENT_MODEL_ID,
-        max_tokens=4096,
+        max_tokens=_health_report_max_tokens(),
         system=system,
         tools=[{
             "name": "report_health",
@@ -77,9 +94,14 @@ def request_health_report(schema: dict, system: str, user: str):
         (block.input for block in response.content if getattr(block, "type", None) == "tool_use"),
         None,
     )
+    stop_reason = getattr(response, "stop_reason", None)
+    if stop_reason == "max_tokens":
+        findings = payload.get("findings") if isinstance(payload, dict) else None
+        log.error(
+            "Anthropic health report hit the output token limit (partial_findings=%d)",
+            len(findings) if isinstance(findings, list) else 0,
+        )
+        raise HealthReportTokenLimitError("Health analysis hit the output token limit")
     if payload is None:
-        stop_reason = getattr(response, "stop_reason", None)
         log.error("Anthropic returned no health report (stop_reason=%s)", stop_reason)
-        if stop_reason == "max_tokens":
-            raise HealthReportTokenLimitError("Health analysis hit the output token limit")
     return payload

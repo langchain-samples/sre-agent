@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 
 import pytest
 
@@ -178,3 +179,22 @@ def test_disabled_notifier_posts_nothing(notifier):
     assert slack_notifier.SlackNotifier.send_structured_report(
         notifier, report(finding())
     ) is None
+
+
+@pytest.mark.parametrize("with_history", [False, True])
+def test_incomplete_analysis_never_renders_all_clear_or_resolved(notifier, with_history):
+    from scheduler import HealthReportTokenLimitError, _analyse_snapshot
+
+    with patch("scheduler.request_health_report", side_effect=HealthReportTokenLimitError()):
+        incomplete = _analyse_snapshot("snapshot")
+    previous = finding()
+    diff = diff_report(incomplete, {fingerprint(previous): stored(fingerprint(previous))}, NOW)
+    notifier.send_structured_report(incomplete, diff=diff if with_history else None)
+    text = body(notifier)
+    assert "Analysis Incomplete" in notifier._client.posted["text"]
+    assert ":large_yellow_circle:" in notifier._client.posted["text"]
+    assert "analysis hit the output token limit" in text
+    assert "review the cluster manually" in text
+    assert "All Clear" not in text
+    assert "Recovered" not in text
+    assert "RESOLVED" not in text

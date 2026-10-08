@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 Severity = Literal["critical", "warning", "info"]
 # Must be a superset of Severity plus "ok". The analysis prompt asks for "the
@@ -47,8 +47,8 @@ class Finding(BaseModel):
     resource_name: str = Field(
         default="",
         description="Name of the single affected object, e.g. 'api-7d9f8b6c4-xk2p1'. "
-        "Use the exact name as it appears in the snapshot. If a finding covers several "
-        "objects, emit one finding per object instead of listing them here.",
+        "Use the exact name as it appears in the snapshot. For grouped findings, use "
+        "one representative name consistently and list all affected objects in detail.",
     )
     reason: str = Field(
         default="",
@@ -62,18 +62,24 @@ class Finding(BaseModel):
 class HealthReport(BaseModel):
     """A structured cluster health report."""
 
+    _analysis_complete: bool = PrivateAttr(default=True)
+
     overall_severity: OverallSeverity = Field(
         description="Highest severity across all findings; 'ok' if the cluster is healthy."
     )
     summary: str = Field(description="One- or two-sentence overall summary.")
     findings: list[Finding] = Field(
         default_factory=list,
-        description="All issues found, most severe first. Empty if the cluster is healthy.",
+        description="At most 10 actionable findings, most severe first. Empty if the cluster is healthy.",
     )
     recommended_actions: list[str] = Field(
         default_factory=list,
         description="Concrete, ordered next steps. May be empty.",
     )
+
+    @property
+    def analysis_complete(self) -> bool:
+        return self._analysis_complete
 
     @property
     def has_issues(self) -> bool:

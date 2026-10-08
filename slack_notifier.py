@@ -85,28 +85,16 @@ class SlackNotifier:
         diff=None,
         report_id: Optional[str] = None,
     ) -> Optional[str]:
-        """Render a typed HealthReport into Slack Block Kit — no text parsing.
-
-        `report` is a schemas.HealthReport. Findings are grouped by severity and
-        rendered directly from typed fields, which removes the regex-on-markdown
-        fragility of send_health_report.
-
-        `channel`/`thread_ts` default to the notifier's channel and no thread
-        (the scheduled path). The interactive Slack path passes them to reply in
-        the originating thread.
-
-        `diff` is an optional monitor_state.ReportDiff. When supplied, findings
-        are labelled NEW / ESCALATED / ongoing-with-age and a resolved section is
-        appended, so a reader can tell at a glance what actually changed since
-        the last check instead of re-reading an identical wall of text. Acked
-        findings are omitted entirely. `report_id` enables the Ack button.
-        """
+        """Render typed findings and optional history into Slack, marking incomplete analysis."""
         if not self.enabled:
             log.info(
                 "[SLACK DISABLED] Structured report (severity=%s, findings=%d)",
                 report.overall_severity, len(report.findings),
             )
             return None
+
+        if not report.analysis_complete:
+            diff = None
 
         # With a diff, the headline reflects what is *currently active and not
         # acked* rather than the raw report — an all-acked report is not "critical".
@@ -131,6 +119,8 @@ class SlackNotifier:
             else " — Recovered" if recovered
             else " — All Clear"
         )
+        if not report.analysis_complete:
+            title = "Cluster Health Report — Analysis Incomplete"
 
         def _trunc(s: str, n: int) -> str:
             return s[:n] + "\n_(truncated)_" if len(s) > n else s
