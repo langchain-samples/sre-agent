@@ -110,6 +110,7 @@ class StoredFinding:
     times_seen: int = 0
     resolved_at: Optional[datetime] = None
     ack_until: Optional[datetime] = None
+    pending_severity: Optional[str] = None
 
     def is_acked(self, now: datetime) -> bool:
         return self.ack_until is not None and self.ack_until > now
@@ -126,6 +127,8 @@ class FindingDelta:
     times_seen: int
     previous_severity: Optional[str] = None
     last_seen: Optional[datetime] = None
+    comparison_severity: Optional[str] = None
+    pending_severity: Optional[str] = None
 
     @property
     def age(self) -> timedelta:
@@ -153,6 +156,7 @@ class ReportDiff:
     resolved: list[ResolvedFinding] = field(default_factory=list)
     # Present in the run but muted by an active ack. Still tracked, never posted.
     suppressed: list[FindingDelta] = field(default_factory=list)
+    suppressed_resolved: list[ResolvedFinding] = field(default_factory=list)
 
     @property
     def active(self) -> list[FindingDelta]:
@@ -199,15 +203,7 @@ def diff_report(
     stored: dict[str, StoredFinding],
     now: Optional[datetime] = None,
 ) -> ReportDiff:
-    """Diff a ``schemas.HealthReport`` against previously stored finding state.
-
-    ``stored`` maps fingerprint -> StoredFinding and should contain the rows we
-    consider open *plus* any acked ones, so an ack survives across runs.
-
-    A finding that was previously resolved and has come back counts as "new"
-    again — a flapping deployment should re-alert — but keeps its cumulative
-    ``times_seen`` so the report can show it is a repeat offender.
-    """
+    """Diff findings against stored state, confirming increases on consecutive runs."""
     now = now or datetime.now(timezone.utc)
     diff = ReportDiff()
 
@@ -225,9 +221,12 @@ def diff_report(
                 times_seen=(prev.times_seen + 1) if prev else 1,
                 previous_severity=prev.severity if prev else None,
                 last_seen=now,
+                comparison_severity=finding.severity,
             )
         else:
-            escalated = _rank(finding.severity) > _rank(prev.severity)
+            higher = _rank(finding.severity) > _rank(prev.severity)
+            escalated = higher and prev.pending_severity == finding.severity
+            pending = finding.severity if higher and not escalated else None
             delta = FindingDelta(
                 finding=finding,
                 fingerprint=fp,
@@ -236,6 +235,8 @@ def diff_report(
                 times_seen=prev.times_seen + 1,
                 previous_severity=prev.severity,
                 last_seen=now,
+                comparison_severity=prev.severity if pending else finding.severity,
+                pending_severity=pending,
             )
 
         # An active ack mutes a finding from notifications but does not stop us
@@ -252,20 +253,20 @@ def diff_report(
     for fp, prev in stored.items():
         if fp in current or prev.resolved_at is not None:
             continue
+        resolved = ResolvedFinding(
+            fingerprint=fp,
+            title=prev.title,
+            namespace=prev.namespace,
+            severity=prev.severity,
+            first_seen=prev.first_seen,
+            last_seen=prev.last_seen,
+        )
         if prev.is_acked(now):
             # Silently close acked findings: the human already said "not now",
             # so telling them it fixed itself is not worth an interrupt.
-            continue
-        diff.resolved.append(
-            ResolvedFinding(
-                fingerprint=fp,
-                title=prev.title,
-                namespace=prev.namespace,
-                severity=prev.severity,
-                first_seen=prev.first_seen,
-                last_seen=prev.last_seen,
-            )
-        )
+            diff.suppressed_resolved.append(resolved)
+        else:
+            diff.resolved.append(resolved)
 
     order = {"critical": 0, "warning": 1, "info": 2}
     for bucket in (diff.new, diff.escalated, diff.ongoing, diff.suppressed):

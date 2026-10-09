@@ -663,14 +663,25 @@ def _coerce_severity(value, allowed: tuple, default: str) -> str:
     return v if v in allowed else default
 
 
-def _repair_health_report(payload):
-    """Salvage a HealthReport whose enums drifted. Returns None if unsalvageable.
+def _normalize_health_report(report):
+    """Derive overall severity from validated findings."""
+    seen = {f.severity for f in report.findings}
+    overall = (
+        "critical" if "critical" in seen
+        else "warning" if "warning" in seen
+        else "info" if seen else "ok"
+    )
+    if report.overall_severity != overall:
+        log.warning(
+            "Corrected HealthReport overall severity (%s -> %s)",
+            report.overall_severity, overall,
+        )
+    report.overall_severity = overall
+    return report
 
-    Without this, one out-of-vocabulary severity discards an entire hourly
-    report and the operator is told to "review the cluster manually" while the
-    findings the model actually produced are thrown away. Individual bad
-    findings are dropped; the rest of the report survives.
-    """
+
+def _repair_health_report(payload):
+    """Salvage and normalize a HealthReport, or return None if unsalvageable."""
     from schemas import Finding, HealthReport
 
     if not isinstance(payload, dict):
@@ -695,23 +706,15 @@ def _repair_health_report(payload):
         return None
     data["findings"] = findings
 
-    overall = _coerce_severity(
+    data["overall_severity"] = _coerce_severity(
         data.get("overall_severity"), ("critical", "warning", "info", "ok"), ""
-    )
-    if not overall:
-        seen = {f.severity for f in findings}
-        overall = (
-            "critical" if "critical" in seen
-            else "warning" if "warning" in seen
-            else "info" if seen else "ok"
-        )
-    data["overall_severity"] = overall
+    ) or "ok"
     data["summary"] = str(data.get("summary") or "").strip() or "Health check completed."
 
     data["recommended_actions"] = [str(a) for a in actions if isinstance(a, (str, int, float))]
 
     try:
-        return HealthReport.model_validate(data)
+        return _normalize_health_report(HealthReport.model_validate(data))
     except Exception:
         return None
 
@@ -723,7 +726,10 @@ def _health_prompt(snapshot: str) -> tuple[str, str]:
         "and produce a structured health report. Focus on actionable issues and name "
         "specific resources. Skip healthy resources unless there is a pattern worth "
         "noting. Set overall_severity to the highest severity among your findings, or "
-        "'ok' if the cluster is healthy."
+        "'ok' if there are no findings. Use critical for a workload down, data loss, "
+        "or a NotReady node; warning for degraded conditions or misconfiguration "
+        "that blocks autoscaling; info for hygiene such as minor version skew. "
+        "Keep severity stable for the same condition on an unchanged snapshot."
     )
     user = (
         "Cluster snapshot collected at "
@@ -767,7 +773,7 @@ def _analyse_snapshot(snapshot: str) -> "HealthReport":
         )
 
     try:
-        return HealthReport.model_validate(payload)
+        return _normalize_health_report(HealthReport.model_validate(payload))
     except ValueError:
         repaired = _repair_health_report(payload)
         if repaired is not None:

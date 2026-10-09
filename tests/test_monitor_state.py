@@ -45,12 +45,12 @@ def report(*findings, severity="critical"):
 
 
 def stored(fp, severity="critical", first_seen=None, times_seen=3,
-           resolved_at=None, ack_until=None):
+           resolved_at=None, ack_until=None, pending_severity=None):
     return StoredFinding(
         fingerprint=fp, severity=severity, title="t", namespace="prod",
         first_seen=first_seen or (NOW - timedelta(hours=6)),
         last_seen=NOW - timedelta(minutes=30), times_seen=times_seen,
-        resolved_at=resolved_at, ack_until=ack_until,
+        resolved_at=resolved_at, ack_until=ack_until, pending_severity=pending_severity,
     )
 
 
@@ -149,13 +149,48 @@ def test_repeat_finding_is_ongoing_and_does_not_notify():
     assert not diff.should_notify()
 
 
-def test_severity_increase_is_an_escalation_and_notifies():
+def test_first_severity_increase_is_ongoing_and_does_not_notify():
     f = finding(severity="critical")
     fp = fingerprint(f)
     diff = diff_report(report(f), {fp: stored(fp, severity="warning")}, NOW)
+    assert not diff.escalated
+    assert len(diff.ongoing) == 1
+    assert diff.ongoing[0].comparison_severity == "warning"
+    assert diff.ongoing[0].pending_severity == "critical"
+    assert not diff.should_notify()
+
+
+def test_consecutive_severity_increase_is_an_escalation_and_notifies():
+    f = finding(severity="critical")
+    fp = fingerprint(f)
+    prev = stored(fp, severity="warning", pending_severity="critical")
+    diff = diff_report(report(f), {fp: prev}, NOW)
     assert len(diff.escalated) == 1
     assert diff.escalated[0].previous_severity == "warning"
+    assert diff.escalated[0].comparison_severity == "critical"
+    assert diff.escalated[0].pending_severity is None
     assert diff.should_notify()
+
+
+@pytest.mark.parametrize("severity", ["warning", "info"])
+def test_return_to_stored_rank_or_below_clears_pending_increase(severity):
+    f = finding(severity=severity)
+    fp = fingerprint(f)
+    prev = stored(fp, severity="warning", pending_severity="critical")
+    diff = diff_report(report(f), {fp: prev}, NOW)
+    assert diff.ongoing[0].pending_severity is None
+    assert diff.ongoing[0].comparison_severity == severity
+    assert not diff.should_notify()
+
+
+def test_different_higher_severity_restarts_confirmation():
+    f = finding(severity="critical")
+    fp = fingerprint(f)
+    prev = stored(fp, severity="info", pending_severity="warning")
+    diff = diff_report(report(f), {fp: prev}, NOW)
+    assert diff.ongoing[0].comparison_severity == "info"
+    assert diff.ongoing[0].pending_severity == "critical"
+    assert not diff.should_notify()
 
 
 def test_severity_decrease_is_not_an_escalation():
@@ -188,11 +223,13 @@ def test_returning_finding_is_new_again_but_keeps_its_history():
     """A flapping deployment should re-alert, and say it is a repeat offender."""
     f = finding()
     fp = fingerprint(f)
-    prev = stored(fp, times_seen=7, resolved_at=NOW - timedelta(hours=2))
+    prev = stored(fp, severity="warning", times_seen=7,
+                  resolved_at=NOW - timedelta(hours=2), pending_severity="critical")
     diff = diff_report(report(f), {fp: prev}, NOW)
     assert len(diff.new) == 1
     assert diff.new[0].times_seen == 8      # cumulative across the flap
     assert diff.new[0].first_seen == NOW    # but the clock restarts
+    assert diff.new[0].pending_severity is None
     assert diff.should_notify()
 
 
@@ -231,10 +268,13 @@ def test_escalation_of_an_acked_finding_stays_suppressed():
     """An ack means "not now" — it should not be defeated by a severity bump."""
     f = finding(severity="critical")
     fp = fingerprint(f)
-    prev = stored(fp, severity="warning", ack_until=NOW + timedelta(hours=5))
+    prev = stored(fp, severity="warning", ack_until=NOW + timedelta(hours=5),
+                  pending_severity="critical")
     diff = diff_report(report(f), {fp: prev}, NOW)
     assert not diff.escalated
     assert len(diff.suppressed) == 1
+    assert diff.suppressed[0].status == "escalated"
+    assert diff.suppressed[0].pending_severity is None
 
 
 def test_acked_finding_resolving_is_silent():
@@ -242,6 +282,7 @@ def test_acked_finding_resolving_is_silent():
     prev = stored(fp, ack_until=NOW + timedelta(hours=5))
     diff = diff_report(report(), {fp: prev}, NOW)
     assert not diff.resolved
+    assert [r.fingerprint for r in diff.suppressed_resolved] == [fp]
     assert not diff.should_notify()
 
 

@@ -151,9 +151,18 @@ def test_escalation_updates_stored_severity(db):
     prior = {fp: StoredFinding(fingerprint=fp, severity="warning",
                                first_seen=NOW, times_seen=2)}
     diff = diff_report(report(f), prior, NOW)
-    assert len(diff.escalated) == 1
+    assert len(diff.ongoing) == 1 and not diff.should_notify()
     db.apply_diff(diff, NOW)
+    tracked = db.load_tracked_findings()
+    assert tracked[fp].severity == "warning"
+    assert tracked[fp].pending_severity == "critical"
+
+    later = NOW + timedelta(hours=1)
+    diff = diff_report(report(f), tracked, later)
+    assert len(diff.escalated) == 1 and diff.should_notify()
+    db.apply_diff(diff, later)
     assert db.load_tracked_findings()[fp].severity == "critical"
+    assert db.load_tracked_findings()[fp].pending_severity is None
 
 
 def test_resolution_sets_resolved_at_but_retains_the_row(db):

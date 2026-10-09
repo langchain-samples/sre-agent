@@ -74,6 +74,17 @@ def test_without_a_diff_it_renders_the_plain_report(notifier):
     assert "sre_ack" not in body(notifier)
 
 
+def test_normalized_analysis_headlines_critical_without_database(notifier, monkeypatch):
+    import scheduler
+
+    payload = report(finding(), severity="warning").model_dump()
+    monkeypatch.setattr(scheduler, "request_health_report", lambda *args: payload)
+    normalized = scheduler._analyse_snapshot("test snapshot")
+    notifier.send_structured_report(normalized, source="scheduled")
+    assert "Critical" in notifier._client.posted["text"]
+    assert " — Issues Found" not in notifier._client.posted["text"]
+
+
 def test_new_finding_is_labelled_and_gets_an_ack_button(notifier):
     diff = diff_report(report(finding()), {}, NOW)
     notifier.send_structured_report(
@@ -102,7 +113,9 @@ def test_ongoing_finding_shows_age_and_occurrence_count(notifier):
 def test_escalation_shows_the_severity_transition(notifier):
     f = finding(severity="critical")
     fp = fingerprint(f)
-    diff = diff_report(report(f), {fp: stored(fp, severity="warning")}, NOW)
+    prev = stored(fp, severity="warning")
+    prev.pending_severity = "critical"
+    diff = diff_report(report(f), {fp: prev}, NOW)
     notifier.send_structured_report(report(f), source="scheduled", diff=diff)
     text = body(notifier)
     assert "*ESCALATED*" in text

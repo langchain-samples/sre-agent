@@ -224,6 +224,7 @@ tests/
   test_monitor_state.py       Fingerprint stability and diff semantics
   test_slack_render.py        Block Kit rendering for every diff shape
   test_persistence.py         Postgres integration (skipped without TEST_DATABASE_URL)
+  test_monitor_persistence.py  Monitoring persistence replay without Postgres
   test_llm_provider.py        Model construction for both providers via LLM_PROVIDER
   test_response_text.py       Content-normalization for Anthropic vs. OpenAI response shapes
   test_health_report_provider.py  Structured health report path for both providers
@@ -276,9 +277,11 @@ Two known gaps are worth calling out.
 
 Scheduled checks are stateful. Each run is diffed against the previous one and
 Slack is only notified when something is **new**, **escalated**, or **newly
-resolved**. Otherwise the run is logged and stays quiet. A digest posts every
-`MONITOR_DIGEST_EVERY_N_CHECKS` runs regardless, so a silent channel still
-proves the bot is alive.
+resolved**. Otherwise the run is logged and stays quiet.
+Severity increases for an open finding must repeat on two consecutive checks
+before they count as escalated; an isolated increase stays ongoing.
+A digest posts every `MONITOR_DIGEST_EVERY_N_CHECKS` runs regardless, so a silent
+channel still proves the bot is alive.
 
 Findings are identified by `namespace/kind/name:reason`, not by the model's
 free-text title (which it rewords between runs) and not by raw pod name (which

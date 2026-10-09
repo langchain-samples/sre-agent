@@ -74,6 +74,27 @@ def test_valid_and_repairable_reports_keep_findings(monkeypatch, provider, sever
 
 
 @pytest.mark.parametrize("provider", ["anthropic", "openai"])
+def test_valid_report_overall_severity_is_derived_from_findings(monkeypatch, provider):
+    payload = {
+        "overall_severity": "warning", "summary": "API pod is down.",
+        "findings": [{"severity": "critical", "title": "API down", "detail": "CrashLoopBackOff"}],
+    }
+    calls = _mock_provider(monkeypatch, provider, payload)
+    report = scheduler._analyse_snapshot("test snapshot")
+    assert report.overall_severity == "critical"
+    assert len(report.findings) == 1
+    assert len(calls) == 1
+
+
+def test_health_prompt_has_a_stable_severity_rubric():
+    system, _user = scheduler._health_prompt("test snapshot")
+    assert "NotReady node" in system
+    assert "blocks autoscaling" in system
+    assert "minor version skew" in system
+    assert "same condition on an unchanged snapshot" in system
+
+
+@pytest.mark.parametrize("provider", ["anthropic", "openai"])
 @pytest.mark.parametrize("payload", [None, {}, {"refusal": "No"}, {"findings": 42},
     {"findings": [{"unusable": "row"}]}, {"findings": [], "recommended_actions": 42}])
 def test_refusals_and_unusable_reports_degrade_to_warning(monkeypatch, provider, payload):

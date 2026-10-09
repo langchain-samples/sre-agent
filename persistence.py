@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS finding_state (
     resource_name text NOT NULL DEFAULT '',
     reason        text NOT NULL DEFAULT '',
     severity      text NOT NULL,
+    pending_severity text,
     title         text NOT NULL DEFAULT '',
     detail        text NOT NULL DEFAULT '',
     first_seen    timestamptz NOT NULL DEFAULT now(),
@@ -79,6 +80,7 @@ CREATE TABLE IF NOT EXISTS finding_state (
 );
 CREATE INDEX IF NOT EXISTS finding_state_open_idx
     ON finding_state (last_seen DESC) WHERE resolved_at IS NULL;
+ALTER TABLE finding_state ADD COLUMN IF NOT EXISTS pending_severity text;
 
 -- Maps a posted report to the fingerprints it covered, so the Slack "Ack"
 -- button can carry a short opaque id instead of a fingerprint list that would
@@ -273,16 +275,12 @@ class PostgresDatabase:
     # -- monitoring finding state -----------------------------------------
 
     def load_tracked_findings(self) -> dict[str, StoredFinding]:
-        """Open findings, plus recently-resolved and acked ones.
-
-        Recently-resolved rows are included so a returning problem is reported
-        as new again while keeping its cumulative ``times_seen``.
-        """
+        """Load open, recently-resolved, and acked findings with confirmation state."""
         with self._pool.connection() as conn:
             cur = conn.execute(
                 """
                 SELECT fingerprint, severity, title, namespace, first_seen,
-                       last_seen, times_seen, resolved_at, ack_until
+                       last_seen, times_seen, resolved_at, ack_until, pending_severity
                   FROM finding_state
                  WHERE resolved_at IS NULL
                     OR resolved_at > now() - make_interval(days => %s)
@@ -303,6 +301,7 @@ class PostgresDatabase:
                 times_seen=r["times_seen"],
                 resolved_at=r["resolved_at"],
                 ack_until=r["ack_until"],
+                pending_severity=r["pending_severity"],
             )
             for r in rows
         }
@@ -321,14 +320,15 @@ class PostgresDatabase:
                         INSERT INTO finding_state (
                             fingerprint, namespace, kind, resource_name, reason,
                             severity, title, detail, first_seen, last_seen,
-                            times_seen, resolved_at
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NULL)
+                            times_seen, pending_severity, resolved_at
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NULL)
                         ON CONFLICT (fingerprint) DO UPDATE SET
                             namespace     = EXCLUDED.namespace,
                             kind          = EXCLUDED.kind,
                             resource_name = EXCLUDED.resource_name,
                             reason        = EXCLUDED.reason,
                             severity      = EXCLUDED.severity,
+                            pending_severity = EXCLUDED.pending_severity,
                             title         = EXCLUDED.title,
                             detail        = EXCLUDED.detail,
                             last_seen     = EXCLUDED.last_seen,
@@ -349,23 +349,25 @@ class PostgresDatabase:
                             getattr(f, "kind", "") or "",
                             getattr(f, "resource_name", "") or "",
                             getattr(f, "reason", "") or "",
-                            f.severity,
+                            delta.comparison_severity or f.severity,
                             (getattr(f, "title", "") or "")[:500],
                             (getattr(f, "detail", "") or "")[:4000],
                             delta.first_seen,
                             now,
                             delta.times_seen,
+                            delta.pending_severity,
                         ),
                     )
 
-                if diff.resolved:
+                resolved = diff.resolved + diff.suppressed_resolved
+                if resolved:
                     conn.execute(
                         """
                         UPDATE finding_state
-                           SET resolved_at = %s
+                           SET resolved_at = %s, pending_severity = NULL
                          WHERE fingerprint = ANY(%s)
                         """,
-                        (now, [r.fingerprint for r in diff.resolved]),
+                        (now, [r.fingerprint for r in resolved]),
                     )
 
     def save_report(self, fingerprints: list[str]) -> Optional[str]:

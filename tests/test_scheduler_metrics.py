@@ -332,6 +332,23 @@ def test_repair_derives_overall_severity_when_missing():
     assert report.overall_severity == "warning"   # highest among findings
 
 
+@pytest.mark.parametrize("supplied,severities,expected", [
+    ("warning", ["critical"] * 10, "critical"),
+    ("critical", ["warning", "info"], "warning"),
+    ("warning", ["info"], "info"),
+    ("critical", [], "ok"),
+])
+def test_repair_replaces_supplied_overall_severity(supplied, severities, expected, caplog):
+    report = _repair_health_report({
+        "overall_severity": supplied, "summary": "s",
+        "findings": [{"severity": severity, "title": "t", "detail": "d"}
+                     for severity in severities],
+    })
+    assert report.overall_severity == expected
+    assert len(report.findings) == len(severities)
+    assert "Corrected HealthReport overall severity" in caplog.text
+
+
 def test_repair_drops_only_the_unsalvageable_finding():
     report = _repair_health_report({
         "overall_severity": "warning",
