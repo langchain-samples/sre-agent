@@ -16,6 +16,7 @@ from scheduler import (
     POD_RESTART_NOTABLE,
     POD_STARTUP_GRACE_MINUTES,
     _classify_pod,
+    _collect_cluster_data,
     _format_snapshot,
     _minutes_since,
 )
@@ -44,7 +45,8 @@ def pod(phase="Running", age_minutes=600, containers=None):
     return NS(
         metadata=NS(namespace="langsmith", name="api-1",
                     creation_timestamp=NOW - timedelta(minutes=age_minutes)),
-        status=NS(phase=phase, container_statuses=containers or [container()]),
+        status=NS(phase=phase, container_statuses=containers or [container()],
+                  conditions=None, start_time=None, reason=None, message=None),
     )
 
 
@@ -139,6 +141,81 @@ def test_recently_failed_pod_is_unhealthy_but_an_old_one_is_not():
         container(ready=False, last_terminated=("Error", 1, POD_FAILURE_RECENCY_MINUTES + 60))])
     assert _classify_pod(recent, NOW)[0] is True
     assert _classify_pod(old, NOW)[0] is False
+
+
+@pytest.mark.parametrize("source", ["conditions", "start_time", "creation_timestamp"])
+@pytest.mark.parametrize("minutes,expected", [
+    (5, True),
+    (POD_FAILURE_RECENCY_MINUTES, True),
+    (POD_FAILURE_RECENCY_MINUTES + 1, False),
+])
+def test_failed_pod_without_containers_uses_fallback_time(source, minutes, expected):
+    p = pod(phase="Failed", age_minutes=POD_FAILURE_RECENCY_MINUTES + 120)
+    p.status.container_statuses = None
+    p.status.reason = "Evicted"
+    stamp = NOW - timedelta(minutes=minutes)
+    if source == "conditions":
+        p.status.conditions = [
+            NS(last_transition_time=stamp - timedelta(minutes=60)),
+            NS(last_transition_time=None),
+            NS(last_transition_time=stamp),
+        ]
+        p.status.start_time = NOW - timedelta(minutes=120)
+    elif source == "start_time":
+        p.status.conditions = [NS(last_transition_time=None)]
+        p.status.start_time = stamp
+    else:
+        p.metadata.creation_timestamp = stamp
+    assert _classify_pod(p, NOW)[0] is expected
+
+
+def test_failed_pod_termination_takes_precedence_over_conditions():
+    p = pod(phase="Failed", containers=[container(
+        ready=False, last_terminated=("Error", 1, POD_FAILURE_RECENCY_MINUTES + 1))])
+    p.status.conditions = [NS(last_transition_time=NOW)]
+    assert _classify_pod(p, NOW)[0] is False
+
+
+def test_evictions_flow_from_collection_to_snapshot(monkeypatch):
+    from unittest.mock import MagicMock
+    from tools import k8s_client
+
+    old = pod(phase="Failed", age_minutes=POD_FAILURE_RECENCY_MINUTES + 120)
+    fresh = pod(phase="Failed")
+    old.metadata.name = "old-eviction"
+    fresh.metadata.name = "fresh-eviction"
+    message = "The node was low on resource: ephemeral-storage. " + "x" * 200
+    for p, minutes in [(old, POD_FAILURE_RECENCY_MINUTES + 30), (fresh, 5)]:
+        p.status.container_statuses = None
+        p.status.conditions = [NS(last_transition_time=
+                                  datetime.now(timezone.utc) - timedelta(minutes=minutes))]
+        p.status.reason = "Evicted"
+        p.status.message = message
+    core = MagicMock()
+    core.list_pod_for_all_namespaces.return_value = NS(items=[old, fresh])
+    core.list_node.return_value = NS(items=[])
+    core.list_event_for_all_namespaces.return_value = NS(items=[])
+    apps = MagicMock()
+    apps.list_deployment_for_all_namespaces.return_value = NS(items=[])
+    autoscaling = MagicMock()
+    autoscaling.list_horizontal_pod_autoscaler_for_all_namespaces.return_value = NS(items=[])
+    custom = MagicMock()
+    custom.list_cluster_custom_object.return_value = {"items": []}
+    monkeypatch.setattr(k8s_client, "core_v1", lambda: core)
+    monkeypatch.setattr(k8s_client, "apps_v1", lambda: apps)
+    monkeypatch.setattr(k8s_client, "autoscaling_v2", lambda: autoscaling)
+    monkeypatch.setattr(k8s_client, "custom_objects", lambda: custom)
+
+    data = _collect_cluster_data()
+    assert data["errors"] == []
+    assert len(data["pods"]) == 2
+    assert [p["name"] for p in data["unhealthy_pods"]] == ["fresh-eviction"]
+    out = _format_snapshot(data)
+    assert "old-eviction" not in out
+    assert "fresh-eviction" in out
+    assert "reason=Evicted" in out
+    assert message[:160] in out
+    assert message[:161] not in out
 
 
 def test_kube_system_is_not_exempt():

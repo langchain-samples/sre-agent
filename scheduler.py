@@ -53,7 +53,7 @@ FAILURE_TERMINATION_REASONS = {
     "OOMKilled", "Error", "ContainerCannotRun", "DeadlineExceeded", "Evicted",
 }
 
-# How recently a *failed* termination must have happened to still count as a
+# How recently a pod failure or failed termination must have happened to count as a
 # current problem. Restart count alone cannot distinguish a crashloop from a
 # healthy redeploy, so recency plus failure reason is used instead.
 POD_FAILURE_RECENCY_MINUTES = int(os.getenv("POD_FAILURE_RECENCY_MINUTES", "60"))
@@ -77,15 +77,7 @@ def _minutes_since(ts, now) -> float:
 
 
 def _classify_pod(pod, now) -> tuple[bool, str, dict]:
-    """Decide whether a pod is unhealthy *right now*.
-
-    Returns (is_unhealthy, status_label, extra_fields).
-
-    Deliberately does NOT use restart_count as a fault signal. restart_count is
-    cumulative for the life of the pod object and never resets, so a workload that
-    was redeployed 43 times reads identically to one that is crashlooping. That
-    single condition was reporting a fleet of healthy Running pods as critical.
-    """
+    """Decide current pod health without using cumulative restarts as a fault signal."""
     statuses = pod.status.container_statuses or []
     phase = pod.status.phase or "Unknown"
     restarts = sum((cs.restart_count or 0) for cs in statuses)
@@ -110,6 +102,8 @@ def _classify_pod(pod, now) -> tuple[bool, str, dict]:
 
     extra = {
         "ready": ready,
+        "pod_reason": pod.status.reason,
+        "pod_message": (pod.status.message or "")[:160],
         "last_termination": last_reason,
         "last_exit_code": last_exit,
         "last_termination_min_ago": None if last_ago == float("inf") else round(last_ago),
@@ -124,7 +118,16 @@ def _classify_pod(pod, now) -> tuple[bool, str, dict]:
     # 2. Failed pod, but only while the failure is still recent. Job pods that
     #    failed weeks ago and were never garbage collected are not today's problem.
     if phase == "Failed":
-        recent = last_ago <= POD_FAILURE_RECENCY_MINUTES or last_reason is None
+        failure_ago = last_ago
+        if last_reason is None:
+            fallback_ts = max(
+                (c.last_transition_time for c in (pod.status.conditions or [])
+                 if c.last_transition_time is not None),
+                default=None,
+            )
+            fallback_ts = fallback_ts or pod.status.start_time or pod.metadata.creation_timestamp
+            failure_ago = _minutes_since(fallback_ts, now)
+        recent = failure_ago <= POD_FAILURE_RECENCY_MINUTES
         return recent, "Failed", extra
 
     if phase == "Succeeded":
@@ -535,6 +538,10 @@ def _format_snapshot(data: dict) -> str:
             if p.get("last_termination") and p.get("last_termination_min_ago") is not None:
                 cause = (f"  last={p['last_termination']}"
                          f"(exit {p.get('last_exit_code')}) {p['last_termination_min_ago']}m ago")
+            if p.get("pod_reason"):
+                cause += f"  reason={p['pod_reason']}"
+            if p.get("pod_message"):
+                cause += f"  {p['pod_message']}"
             lines.append(
                 f"  {p['namespace']}/{p['name']}  {p['status']}  restarts={p['restarts']}  age={p['age']}"
                 f"{cause}{_pod_usage(p['namespace'], p['name'])}"

@@ -94,7 +94,7 @@ python api.py         # API + web UI at http://localhost:8080
 | `MONITOR_NOTIFY_ON_RESOLVED` | No | Announce findings that cleared (default: `true`) |
 | `MONITOR_ACK_HOURS` | No | How long the Slack **Ack** button mutes a finding (default: `24`) |
 | `PVC_USAGE_ALERT_PERCENT` | No | PVCs at or above this fill level are listed individually in the health snapshot (default: `70`) |
-| `POD_FAILURE_RECENCY_MINUTES` | No | A failed container termination older than this is history, not a live fault (default: `60`) |
+| `POD_FAILURE_RECENCY_MINUTES` | No | A pod failure or failed container termination older than this is history, not a live fault (default: `60`) |
 | `POD_STARTUP_GRACE_MINUTES` | No | Grace before Pending or not-ready counts as a fault (default: `10`) |
 | `POD_RESTART_NOTABLE` | No | Lifetime restart counts at or above this are reported as context, never a fault (default: `10`) |
 | `EVENT_MAX_AGE_MINUTES` | No | Warning events older than this are dropped (default: `60`) |
